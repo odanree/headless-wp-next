@@ -20,10 +20,6 @@ import Stripe from 'stripe';
 // for PCI DSS SAQ-A — the lowest burden tier. Card data never crosses our
 // Next.js server or Vercel infrastructure.
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-02-25.clover',
-});
-
 interface CartLineItem {
   name: string;
   price: string;   // e.g. "$49.00" or "49.00"
@@ -37,6 +33,10 @@ function parsePriceCents(price: string): number {
 }
 
 export async function POST(request: NextRequest) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: '2026-02-25.clover',
+  });
+
   try {
     const body = await request.json() as { items: CartLineItem[] };
     const { items } = body;

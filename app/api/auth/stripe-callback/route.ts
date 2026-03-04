@@ -17,11 +17,10 @@ import Stripe from 'stripe';
 //
 // The success page is now a pure display component — no Stripe SDK, no cookies.
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-02-25.clover',
-});
-
 export async function GET(request: NextRequest) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: '2026-02-25.clover',
+  });
   const sessionId = request.nextUrl.searchParams.get('session_id');
 
   if (!sessionId) {

@@ -23,11 +23,10 @@ import Stripe from 'stripe';
 //   Stripe dashboard (Developers → Webhooks → Add endpoint).
 //   Set STRIPE_WEBHOOK_SECRET in Vercel environment variables.
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-02-25.clover',
-});
-
 export async function POST(request: NextRequest) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: '2026-02-25.clover',
+  });
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   // If no webhook secret is configured (e.g. local dev without Stripe CLI),
