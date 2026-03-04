@@ -16,9 +16,26 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// ─── Custom Post Type ─────────────────────────────────────────────────────────
+// ─── Custom Post Types ───────────────────────────────────────────────────────
 
 add_action( 'init', 'hwp_register_member_article_cpt' );
+add_action( 'init', 'hwp_register_member_cpt' );
+
+// Stores one record per paying customer — email, Stripe session ID, granted_at.
+// Lives in WP Admin → Members (not Users), keeping customer data separate from
+// WP accounts. No WP user is created for paying customers.
+function hwp_register_member_cpt(): void {
+    register_post_type( 'member', [
+        'label'           => 'Members',
+        'public'          => false,
+        'show_ui'         => true,
+        'show_in_rest'    => false,
+        'supports'        => [ 'title', 'custom-fields' ],
+        'menu_icon'       => 'dashicons-groups',
+        'capability_type' => 'post',
+        'rewrite'         => false,
+    ] );
+}
 
 function hwp_register_member_article_cpt(): void {
     register_post_type( 'member_article', [
@@ -258,8 +275,9 @@ function hwp_trigger_revalidation( int $post_id, WP_Post $post ): void {
 
 // ─── Stripe membership fulfillment ───────────────────────────────────────────
 // Called by POST /api/webhooks/stripe in the Next.js app after a successful
-// checkout.session.completed event. Finds or creates a WP user, grants the
-// member role, and stores the Stripe session ID for audit.
+// checkout.session.completed event. Finds or creates a `member` CPT post by
+// email — no WP user account is created. Customer records live in
+// WP Admin → Members, completely separate from the Users list.
 
 function hwp_grant_membership( WP_REST_Request $request ): WP_REST_Response|WP_Error {
     $email      = $request->get_param( 'email' );
@@ -269,40 +287,45 @@ function hwp_grant_membership( WP_REST_Request $request ): WP_REST_Response|WP_E
         return new WP_Error( 'invalid_email', 'Invalid email address.', [ 'status' => 400 ] );
     }
 
-    // Find existing user or create a new one.
-    // wp_create_user() generates a random password — users join via Stripe,
-    // not the WP login form, so no plain-text password is stored or sent.
-    $user = get_user_by( 'email', $email );
-    if ( ! $user ) {
-        $user_id = wp_create_user( $email, wp_generate_password( 24, true, true ), $email );
-        if ( is_wp_error( $user_id ) ) {
+    // Find existing member post by email meta (idempotent on repeat deliveries).
+    $existing = get_posts( [
+        'post_type'   => 'member',
+        'post_status' => 'publish',
+        'numberposts' => 1,
+        'meta_query'  => [ [
+            'key'   => 'member_email',
+            'value' => $email,
+        ] ],
+    ] );
+
+    if ( $existing ) {
+        $member_id = $existing[0]->ID;
+    } else {
+        // Create a new member record — title is the email for easy scanning in WP Admin.
+        $member_id = wp_insert_post( [
+            'post_type'   => 'member',
+            'post_status' => 'publish',
+            'post_title'  => $email,
+        ], true );
+
+        if ( is_wp_error( $member_id ) ) {
             return new WP_Error(
-                'user_create_failed',
-                $user_id->get_error_message(),
+                'member_create_failed',
+                $member_id->get_error_message(),
                 [ 'status' => 500 ]
             );
         }
-        $user = get_user_by( 'id', $user_id );
+
+        update_post_meta( $member_id, 'member_email', $email );
     }
 
-    // Assign the subscriber role (members can read protected content).
-    // Role is idempotent — safe to call on repeat webhook deliveries.
-    // Guard: never downgrade an admin, editor, or author — only set if the
-    // user has no elevated role (e.g. a new customer or bare subscriber).
-    $protected_roles = [ 'administrator', 'editor', 'author' ];
-    $has_elevated    = (bool) array_intersect( $protected_roles, $user->roles );
-    if ( ! $has_elevated ) {
-        $user->set_role( 'subscriber' );
-    }
-
-    // Store Stripe session for audit trail — enables refund/revoke lookups.
-    update_user_meta( $user->ID, 'stripe_session_id',      $session_id );
-    update_user_meta( $user->ID, 'membership_granted_at',  current_time( 'mysql' ) );
+    // Update audit meta on every grant (handles repeat Stripe deliveries).
+    update_post_meta( $member_id, 'stripe_session_id',     $session_id );
+    update_post_meta( $member_id, 'membership_granted_at', current_time( 'mysql' ) );
 
     return new WP_REST_Response( [
-        'user_id' => $user->ID,
-        'email'   => $email,
-        'role'    => 'subscriber',
-        'granted' => true,
+        'member_id' => $member_id,
+        'email'     => $email,
+        'granted'   => true,
     ], 200 );
 }
