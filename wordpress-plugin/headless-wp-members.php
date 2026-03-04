@@ -287,7 +287,13 @@ function hwp_grant_membership( WP_REST_Request $request ): WP_REST_Response|WP_E
 
     // Assign the subscriber role (members can read protected content).
     // Role is idempotent — safe to call on repeat webhook deliveries.
-    $user->set_role( 'subscriber' );
+    // Guard: never downgrade an admin, editor, or author — only set if the
+    // user has no elevated role (e.g. a new customer or bare subscriber).
+    $protected_roles = [ 'administrator', 'editor', 'author' ];
+    $has_elevated    = (bool) array_intersect( $protected_roles, $user->roles );
+    if ( ! $has_elevated ) {
+        $user->set_role( 'subscriber' );
+    }
 
     // Store Stripe session for audit trail — enables refund/revoke lookups.
     update_user_meta( $user->ID, 'stripe_session_id',      $session_id );
