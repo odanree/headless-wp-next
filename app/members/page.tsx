@@ -40,7 +40,16 @@ export default async function MembersPage() {
         </main>
       );
     }
-    throw err;
+    // Network-level failure (ENOTFOUND, ECONNREFUSED, etc.) — WordPress unreachable.
+    // Render a graceful fallback instead of crashing with a 500.
+    return (
+      <main className="max-w-4xl mx-auto px-6 py-12">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-sm text-yellow-800">
+          <p className="font-semibold mb-1">Content temporarily unavailable</p>
+          <p>The WordPress backend is not reachable right now. Please try again in a moment.</p>
+        </div>
+      </main>
+    );
   }
 
   const { articles } = data;
