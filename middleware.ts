@@ -48,5 +48,5 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ['/article/:path*'],
+  matcher: ['/article/:path*', '/members/:path*', '/members'],
 };

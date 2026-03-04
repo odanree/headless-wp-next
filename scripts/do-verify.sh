@@ -21,12 +21,18 @@ API_TOKEN="${3:-}"
 REVALIDATION_SECRET="${4:-}"
 
 if [[ -z "$DOMAIN" || -z "$NEXT_URL" || -z "$API_TOKEN" ]]; then
-  echo "Usage: ./do-verify.sh <wp-domain> <next-url> <api-token> [revalidation-secret]"
+  echo "Usage: ./do-verify.sh <wp-domain-or-url> <next-url> <api-token> [revalidation-secret]"
+  echo "Example: ./do-verify.sh http://64.23.165.167 https://example.vercel.app my-token my-secret"
   echo "Example: ./do-verify.sh cms.example.com https://example.vercel.app my-token my-secret"
   exit 1
 fi
 
-WP_BASE="https://${DOMAIN}"
+# Accept full URLs (http:// or https://) or bare domain/IP (defaults to https://)
+if [[ "$DOMAIN" == http://* || "$DOMAIN" == https://* ]]; then
+  WP_BASE="${DOMAIN}"
+else
+  WP_BASE="https://${DOMAIN}"
+fi
 PASS=0
 FAIL=0
 
