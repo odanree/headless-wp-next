@@ -11,12 +11,16 @@ Runs in **mock mode** by default — no WordPress install required. Swap in real
 | Concept | Where |
 |---|---|
 | Edge Middleware auth gate | [`middleware.ts`](middleware.ts) |
-| httpOnly cookie session | [`app/api/auth/login/route.ts`](app/api/auth/login/route.ts) |
+| httpOnly cookie session | [`app/checkout/success/page.tsx`](app/checkout/success/page.tsx) |
+| Stripe Checkout + webhook fulfillment | [`app/api/checkout/route.ts`](app/api/checkout/route.ts) + [`app/api/webhooks/stripe/route.ts`](app/api/webhooks/stripe/route.ts) |
 | Server Component data fetching | [`app/members/page.tsx`](app/members/page.tsx) |
 | Server + Client Component composition | `page.tsx` (SC) + `LogoutButton.tsx` (CC) |
 | Mock → live data swap | [`lib/wordpress.ts`](lib/wordpress.ts) |
 | ISR + on-demand revalidation | [`lib/wordpress.ts`](lib/wordpress.ts) + [`app/api/revalidate/route.ts`](app/api/revalidate/route.ts) |
 | WordPress CPT + Bearer token REST API | [`wordpress-plugin/headless-wp-members.php`](wordpress-plugin/headless-wp-members.php) |
+| Member CPT — customer records outside WP Users | [`wordpress-plugin/headless-wp-members.php`](wordpress-plugin/headless-wp-members.php) |
+| Lazy SDK init (build-time safety) | [`app/api/webhooks/stripe/route.ts`](app/api/webhooks/stripe/route.ts) |
+| generateStaticParams build resilience | [`app/article/[id]/page.tsx`](app/article/%5Bid%5D/page.tsx) |
 | Semantic HTML & ADA focus management | [`app/join/JoinForm.tsx`](app/join/JoinForm.tsx) + [`app/members/LogoutButton.tsx`](app/members/LogoutButton.tsx) |
 
 ---
@@ -26,33 +30,44 @@ Runs in **mock mode** by default — no WordPress install required. Swap in real
 ```
 Browser
   │
-  ├─ GET /members
-  │      │
-  │      ▼  (Edge — before any page loads)
+  ├─ GET /article/* or /members  (unauthenticated)
+  │      ▼  (Vercel Edge — before any page renders)
   │   middleware.ts
-  │      ├─ no cookie ──────────────▶ 302 /join?redirectBack=/members
-  │      └─ cookie present
-  │             │ injects x-member-token header
-  │             ▼
-  │   app/members/page.tsx  (Server Component)
-  │             │  await getMemberArticles()
-  │             ▼
-  │   lib/wordpress.ts
-  │             ├─ WORDPRESS_URL not set ──▶ lib/mock-data.ts (instant)
-  │             └─ WORDPRESS_URL set ──────▶ fetch() → WordPress REST API
-  │                                                 Authorization: Bearer <token>
-  │                                                 next: { revalidate: 300, tags: ['articles'] }
+  │      ├─ no member_token cookie ──▶ 307 /join?redirectBack=...
+  │      └─ cookie present          ──▶ forward via x-member-token header
   │
-  ├─ POST /api/auth/login
-  │      │  { username, password }
-  │      └─ validates → Set-Cookie: member_token=<token>; HttpOnly; Secure
+  ├─ POST /api/checkout
+  │      └─ creates Stripe Checkout Session → returns { url }
+  │         client redirects to stripe.com hosted page
+  │         (card data never crosses our server — SAQ-A PCI scope)
   │
-  ├─ POST /api/auth/logout
-  │      └─ Set-Cookie: member_token=; MaxAge=0
+  ├─ stripe.com (hosted checkout)
+  │      ├─ [async] POST /api/webhooks/stripe
+  │      │         event: checkout.session.completed
+  │      │         verified via stripe.webhooks.constructEvent()
+  │      │         → POST /wp-json/headless/v1/grant-membership
+  │      │            finds-or-creates Member CPT post by email
+  │      │            stores stripe_session_id + membership_granted_at
+  │      │
+  │      └─ GET /api/auth/stripe-callback?session_id=cs_...
+  │                stripe.checkout.sessions.retrieve() — server-side only
+  │                guard: payment_status === 'paid'
+  │                Set-Cookie: member_token=stripe:<session_id>; HttpOnly; Secure
+  │                → 307 /checkout/success
+  │
+  ├─ GET /members or /article/*  (authenticated)
+  │      ▼
+  │   middleware.ts  (cookie present — allowed through)
+  │      ▼
+  │   Server Component  →  lib/wordpress.ts
+  │      ├─ WORDPRESS_URL not set ──▶ lib/mock-data.ts (instant, mock mode)
+  │      └─ WORDPRESS_URL set ──────▶ fetch() → WordPress REST API
+  │                                         Authorization: Bearer <token>
+  │                                         next: { revalidate: 300, tags: ['articles'] }
   │
   └─ POST /api/revalidate
-         │  { tag: 'articles', secret: '...' }
-         └─ revalidateTag('articles') — instant CDN cache bust
+         │  { secret, tags: ['articles', 'public-articles', 'article-<id>'] }
+         └─ revalidateTag() — instant CDN cache bust (triggered by WP save_post hook)
 ```
 
 ---
@@ -133,15 +148,22 @@ In mock mode (no `WORDPRESS_URL` set), the Vercel deployment works out of the bo
 
 > These are the decisions worth articulating in an interview — not just "what did you build" but "why did you build it this way."
 
-### Demo vs. production membership: cookie simulation → JWT entitlement
+### Webhook as source of truth — not the success page redirect
 
-The membership gate in this repo uses a verified Stripe session to set an httpOnly cookie — real server-side verification, but the access grant lives only in the browser. The production upgrade path moves to a **webhook-driven entitlement system** where:
-
-1. `checkout.session.completed` writes membership status to WordPress User Meta (the IdP)
-2. Login mints a signed JWT embedding membership claims + expiry
-3. `middleware.ts` verifies the JWT at the Edge in ~0.1 ms — no database round-trip
+The `/checkout/success` page only runs if the user's browser completes the round-trip from Stripe. If the tab is closed mid-redirect, the payment is captured but the cookie is never set. The `/api/webhooks/stripe` endpoint fires from Stripe's infrastructure **regardless of browser state** — tab closed, network dropped, ad blocker, anything. This is why the webhook is treated as the authoritative fulfillment path, with the success page redirect as a UX convenience on top.
 
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the full two-stage design, a side-by-side security comparison, and interview talking points on JWT revocation, PCI scope, and why the webhook is the source of truth.
+
+### Member CPT vs. WP Users for customer records
+
+Paying customers are stored as **Member custom post type records** in WordPress, not as WP user accounts. Each Member post has `member_email`, `stripe_session_id`, and `membership_granted_at` in post meta — visible in WP Admin → Members, completely separate from the Users list.
+
+The reasons:
+1. **No WP login needed** — customers authenticate via Stripe cookie, never via WP credentials. Creating a WP user account implies a login workflow that doesn't exist here.
+2. **Role safety** — `set_role('subscriber')` blindly overwrites any existing role, which demoted an admin account during development before this design was adopted.
+3. **Clean admin surface** — customer records don't pollute the Users list, which is reserved for content authors and admins.
+
+The access check remains purely cookie-based — the Member CPT is an audit trail, not an auth store.
 
 ---
 
