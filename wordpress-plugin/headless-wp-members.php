@@ -262,6 +262,9 @@ function hwp_trigger_revalidation( int $post_id, WP_Post $post ): void {
     //  - 'article-{id}'     → individual article page (TTL 300 s)
     // The Next.js `/api/revalidate` route accepts a `tags` array so all
     // three are purged atomically without three round-trips.
+    // blocking: true with a short timeout — more reliable than fire-and-forget on
+    // PHP-FPM hosts where the process may terminate before the cURL socket flushes.
+    // Vercel responds in < 200 ms so the 5 s timeout is never hit in practice.
     wp_remote_post( $next_url, [
         'headers'    => [ 'Content-Type' => 'application/json' ],
         'body'       => wp_json_encode( [
@@ -269,7 +272,7 @@ function hwp_trigger_revalidation( int $post_id, WP_Post $post ): void {
             'tags'   => [ 'articles', 'public-articles', 'article-' . $post_id ],
         ] ),
         'timeout'    => 5,
-        'blocking'   => false, // fire and forget — never block the WP save request
+        'blocking'   => true,
     ] );
 }
 
