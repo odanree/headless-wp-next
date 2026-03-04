@@ -6,9 +6,18 @@
 
 import Link from 'next/link';
 import { useCart } from '@/contexts/CartContext';
+import { useEffect, useState } from 'react';
 
 export default function NavBar() {
   const { itemCount } = useCart();
+  // Guard against server/client hydration mismatch: localStorage cart is
+  // unavailable on the server so itemCount starts at 0 there but may be >0
+  // on the client after the context useEffect fires. Suppress the badge
+  // until after hydration to keep the DOM identical on both passes.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  const displayCount = mounted ? itemCount : 0;
 
   return (
     <nav className="sticky top-0 z-50 bg-[#1a1a2e] border-b border-white/10 h-14 flex items-center" aria-label="Main navigation">
@@ -39,16 +48,16 @@ export default function NavBar() {
         <Link
           href="/cart"
           className="relative text-white/80 hover:text-white transition-colors ml-auto"
-          aria-label={itemCount > 0 ? `Cart — ${itemCount} item${itemCount !== 1 ? 's' : ''}` : 'Cart — empty'}
+          aria-label={displayCount > 0 ? `Cart — ${displayCount} item${displayCount !== 1 ? 's' : ''}` : 'Cart — empty'}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="9" cy="21" r="1" />
             <circle cx="20" cy="21" r="1" />
             <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
           </svg>
-          {itemCount > 0 && (
+          {displayCount > 0 && (
             <span className="absolute -top-2 -right-2 bg-blue-600 text-white text-[0.65rem] font-bold min-w-[18px] h-[18px] rounded-full flex items-center justify-center px-1 ring-2 ring-[#1a1a2e]" aria-hidden="true">
-              {itemCount > 99 ? '99+' : itemCount}
+              {displayCount > 99 ? '99+' : displayCount}
             </span>
           )}
         </Link>
