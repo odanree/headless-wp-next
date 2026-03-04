@@ -78,6 +78,20 @@ function hwp_register_rest_routes(): void {
             'per_page' => [ 'default' => 10, 'sanitize_callback' => 'absint' ],
         ],
     ] );
+
+    // POST /wp-json/headless/v1/grant-membership
+    // Called by the Next.js Stripe webhook (checkout.session.completed).
+    // Finds or creates a WP user by email and assigns the member role.
+    // Protected by the same Bearer token as the article endpoints.
+    register_rest_route( $namespace, '/grant-membership', [
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => 'hwp_grant_membership',
+        'permission_callback' => 'hwp_check_bearer_token',
+        'args'                => [
+            'email'             => [ 'required' => true,  'sanitize_callback' => 'sanitize_email' ],
+            'stripe_session_id' => [ 'required' => true,  'sanitize_callback' => 'sanitize_text_field' ],
+        ],
+    ] );
 }
 
 // ─── Permission callback ──────────────────────────────────────────────────────
@@ -225,10 +239,64 @@ function hwp_trigger_revalidation( int $post_id, WP_Post $post ): void {
 
     if ( ! $next_url || ! $secret ) return;
 
+    // Bust all three cache layers in one request:
+    //  - 'articles'         → member article list (TTL 300 s)
+    //  - 'public-articles'  → public teaser list  (TTL 3600 s)
+    //  - 'article-{id}'     → individual article page (TTL 300 s)
+    // The Next.js `/api/revalidate` route accepts a `tags` array so all
+    // three are purged atomically without three round-trips.
     wp_remote_post( $next_url, [
         'headers'    => [ 'Content-Type' => 'application/json' ],
-        'body'       => wp_json_encode( [ 'tag' => 'articles', 'secret' => $secret ] ),
+        'body'       => wp_json_encode( [
+            'secret' => $secret,
+            'tags'   => [ 'articles', 'public-articles', 'article-' . $post_id ],
+        ] ),
         'timeout'    => 5,
-        'blocking'   => false, // fire and forget
+        'blocking'   => false, // fire and forget — never block the WP save request
     ] );
+}
+
+// ─── Stripe membership fulfillment ───────────────────────────────────────────
+// Called by POST /api/webhooks/stripe in the Next.js app after a successful
+// checkout.session.completed event. Finds or creates a WP user, grants the
+// member role, and stores the Stripe session ID for audit.
+
+function hwp_grant_membership( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+    $email      = $request->get_param( 'email' );
+    $session_id = $request->get_param( 'stripe_session_id' );
+
+    if ( ! is_email( $email ) ) {
+        return new WP_Error( 'invalid_email', 'Invalid email address.', [ 'status' => 400 ] );
+    }
+
+    // Find existing user or create a new one.
+    // wp_create_user() generates a random password — users join via Stripe,
+    // not the WP login form, so no plain-text password is stored or sent.
+    $user = get_user_by( 'email', $email );
+    if ( ! $user ) {
+        $user_id = wp_create_user( $email, wp_generate_password( 24, true, true ), $email );
+        if ( is_wp_error( $user_id ) ) {
+            return new WP_Error(
+                'user_create_failed',
+                $user_id->get_error_message(),
+                [ 'status' => 500 ]
+            );
+        }
+        $user = get_user_by( 'id', $user_id );
+    }
+
+    // Assign the subscriber role (members can read protected content).
+    // Role is idempotent — safe to call on repeat webhook deliveries.
+    $user->set_role( 'subscriber' );
+
+    // Store Stripe session for audit trail — enables refund/revoke lookups.
+    update_user_meta( $user->ID, 'stripe_session_id',      $session_id );
+    update_user_meta( $user->ID, 'membership_granted_at',  current_time( 'mysql' ) );
+
+    return new WP_REST_Response( [
+        'user_id' => $user->ID,
+        'email'   => $email,
+        'role'    => 'subscriber',
+        'granted' => true,
+    ], 200 );
 }

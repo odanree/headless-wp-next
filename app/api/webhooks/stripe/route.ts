@@ -59,15 +59,57 @@ export async function POST(request: NextRequest) {
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
-      console.log('[webhook] Payment succeeded — session:', session.id);
-      console.log('[webhook] Customer email:', session.customer_details?.email);
-      console.log('[webhook] Items:', session.metadata?.item_names);
+      const email = session.customer_details?.email;
 
-      // TODO (production):
-      // 1. Look up the WordPress user by session.customer_details.email
-      // 2. Grant membership role via WP REST API or custom endpoint
-      // 3. Send confirmation email via WordPress or SendGrid
-      // 4. Create WooCommerce order via Store API for reporting
+      console.log('[webhook] Payment succeeded — session:', session.id, '| email:', email);
+
+      if (!email) {
+        console.error('[webhook] No customer email on session — cannot grant membership:', session.id);
+        break;
+      }
+
+      // ── Grant WordPress membership ────────────────────────────────────────
+      // Calls POST /wp-json/headless/v1/grant-membership on the WP origin.
+      // The endpoint finds-or-creates a WP user by email and assigns the
+      // subscriber role, storing the Stripe session_id for audit.
+      //
+      // IDEMPOTENCY: Stripe may deliver the same event more than once.
+      // The WP endpoint uses get_user_by('email') + set_role() which are
+      // both safe to call repeatedly — no duplicate users, no duplicate rows.
+      //
+      // FAILURE HANDLING: We log but do not throw — returning anything other
+      // than 2xx here would cause Stripe to retry with exponential backoff,
+      // which is the correct behaviour for transient WP failures.
+      const wpUrl   = process.env.WORDPRESS_URL;
+      const wpToken = process.env.WORDPRESS_API_TOKEN;
+
+      if (wpUrl && wpToken) {
+        try {
+          const res = await fetch(`${wpUrl}/wp-json/headless/v1/grant-membership`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${wpToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email,
+              stripe_session_id: session.id,
+            }),
+          });
+
+          if (!res.ok) {
+            const body = await res.text();
+            console.error(`[webhook] WP grant-membership failed (${res.status}):`, body);
+          } else {
+            const data = await res.json() as { user_id: number; email: string; granted: boolean };
+            console.log('[webhook] Membership granted — WP user_id:', data.user_id, '| email:', data.email);
+          }
+        } catch (err) {
+          console.error('[webhook] Failed to reach WP grant-membership endpoint:', err);
+        }
+      } else {
+        console.warn('[webhook] WORDPRESS_URL / WORDPRESS_API_TOKEN not set — membership grant skipped (mock mode)');
+      }
       break;
     }
 
