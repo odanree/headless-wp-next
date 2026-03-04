@@ -11,11 +11,14 @@
 // to Googlebot  not cloaking. ISR revalidate: 3600 + tag 'public-articles'.
 
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { getPublicArticles } from '@/lib/wordpress';
 import { getProducts } from '@/lib/woocommerce';
 import ArticleCard from './ArticleCard';
 
-export const revalidate = 3600;
+// Dynamic — reads cookies() to detect auth state for the purchase CTA.
+// Article data fetches are ISR-cached independently via wpFetch tags.
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Member Articles',
@@ -25,6 +28,9 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
+  const cookieStore = cookies();
+  const isAuthenticated = !!cookieStore.get('member_token')?.value;
+
   const [articlesResponse, products] = await Promise.all([
     getPublicArticles(),
     getProducts(),
@@ -91,6 +97,7 @@ export default async function HomePage() {
             key={article.id}
             article={article}
             annualPass={annualPass ?? null}
+            isAuthenticated={isAuthenticated}
           />
         ))}
       </section>

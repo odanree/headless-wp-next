@@ -2,14 +2,21 @@
 
 // ─── NavBar ───────────────────────────────────────────────────────────────────
 // Client Component — reads CartContext for the item count badge.
-// Lives inside CartProvider (root layout), which is the client boundary.
+// isAuthenticated is passed from the Server Component layout (reads httpOnly
+// member_token cookie server-side so JS never touches it).
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCart } from '@/contexts/CartContext';
 import { useEffect, useState } from 'react';
 
-export default function NavBar() {
+interface NavBarProps {
+  isAuthenticated: boolean;
+}
+
+export default function NavBar({ isAuthenticated }: NavBarProps) {
   const { itemCount } = useCart();
+  const router = useRouter();
   // Guard against server/client hydration mismatch: localStorage cart is
   // unavailable on the server so itemCount starts at 0 there but may be >0
   // on the client after the context useEffect fires. Suppress the badge
@@ -18,6 +25,12 @@ export default function NavBar() {
   useEffect(() => { setMounted(true); }, []);
 
   const displayCount = mounted ? itemCount : 0;
+
+  async function handleSignOut() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/');
+    router.refresh();
+  }
 
   return (
     <nav className="sticky top-0 z-50 bg-[#1a1a2e] border-b border-white/10 h-14 flex items-center" aria-label="Main navigation">
@@ -39,9 +52,18 @@ export default function NavBar() {
             </Link>
           </li>
           <li>
-            <Link href="/join" className="text-white/70 hover:text-white text-sm font-medium transition-colors">
-              Join
-            </Link>
+            {isAuthenticated ? (
+              <button
+                onClick={handleSignOut}
+                className="text-white/70 hover:text-white text-sm font-medium transition-colors"
+              >
+                Sign Out
+              </button>
+            ) : (
+              <Link href="/join" className="text-white/70 hover:text-white text-sm font-medium transition-colors">
+                Join
+              </Link>
+            )}
           </li>
         </ul>
 
