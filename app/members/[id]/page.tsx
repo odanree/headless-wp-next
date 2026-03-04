@@ -6,11 +6,17 @@ import { LogoutButton } from '../LogoutButton';
 
 type Props = { params: { id: string } };
 
+// Allow paths not returned by generateStaticParams to be rendered on-demand.
+export const dynamicParams = true;
+
 export async function generateStaticParams() {
-  // Pre-render all mock articles at build time.
-  // When connected to live WordPress, this pre-renders the first page of content.
-  const { articles } = await getMemberArticles();
-  return articles.map((a) => ({ id: String(a.id) }));
+  // Best-effort pre-render; returns [] when WordPress is unreachable at build time.
+  try {
+    const { articles } = await getMemberArticles();
+    return articles.map((a) => ({ id: String(a.id) }));
+  } catch {
+    return [];
+  }
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
