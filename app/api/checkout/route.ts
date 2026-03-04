@@ -60,8 +60,10 @@ export async function POST(request: NextRequest) {
         },
         quantity: item.quantity,
       })),
-      // Redirect URLs after Stripe-hosted checkout
-      success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      // Stripe redirects to the Route Handler which sets the cookie, then
+      // redirects to /checkout/success for display. Cookies cannot be set
+      // in Server Component pages in Next.js 14 App Router.
+      success_url: `${origin}/api/auth/stripe-callback?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/cart`,
       // Store cart metadata for the webhook fulfillment handler
       metadata: {
