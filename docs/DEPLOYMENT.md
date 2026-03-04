@@ -40,7 +40,7 @@ Browser
 2. **Create** → **Droplets**
 3. Settings:
    - **Image**: Ubuntu 24.04 LTS x64
-   - **Plan**: Basic — Regular — **$12/mo** (2 GB RAM / 1 CPU / 50 GB SSD)
+   - **Plan**: Basic — Regular — **$6/mo** (1 GB RAM / 1 CPU / 25 GB SSD)
    - **Region**: pick closest to your users
    - **Authentication**: SSH Key (recommended) or Password
 4. Click **Create Droplet**

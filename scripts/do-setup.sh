@@ -10,7 +10,7 @@
 #   ./do-setup.sh cms.yourdomain.com your-api-token
 #
 # Prerequisites:
-#   1. Droplet created (Ubuntu 24.04, Basic $12/mo, any region)
+#   1. Droplet created (Ubuntu 24.04, Basic $6/mo, any region)
 #   2. A record: cms.yourdomain.com → Droplet IP (propagation ~5 min)
 #   3. Port 80+443 reachable (DO Cloud Firewall or ufw)
 #
