@@ -119,6 +119,38 @@ WordPress ships with a user management system, roles, and a REST API that expose
 
 The webhook handler writes `membership_expires` alongside `membership_active`. The JWT embeds an `exp` claim matching this date. Middleware rejects expired tokens without any network call — the expiry is baked into the signed token.
 
+---
+
+## Stage 2 Variant — Implemented: Member CPT Instead of WP Users
+
+In the production build of this repo, Stage 2's WP-as-IdP model was adapted: rather than creating WP user accounts for paying customers and storing entitlement in user meta, paying customers are stored as **Member custom post type records**.
+
+### Why CPT over WP Users
+
+| Concern | WP Users approach | Member CPT approach (implemented) |
+|---|---|---|
+| Auth mechanism | WP credentials + Application Password | Stripe cookie — no WP login |
+| Role collision risk | `set_role()` overwrites existing roles | No roles involved |
+| Admin surface | Customer accounts appear in Users list | Customers appear in Members CPT |
+| Revocation | Delete/deactivate WP user | Delete Member post |
+| Data ownership | Coupled to WP auth system | Fully independent |
+
+The core insight: customers in this system **never authenticate via WordPress**. They authenticate via a Stripe-issued cookie. Creating a WP user account implies a WP login workflow that does not exist — it adds risk (role collisions, password reset emails, Users list pollution) with no benefit.
+
+### Member CPT record structure
+
+Each paying customer creates one `member` CPT post:
+- **Post title**: customer email (for admin visibility)
+- **`member_email`** meta: email address
+- **`stripe_session_id`** meta: Stripe Checkout Session ID for audit/refund lookup
+- **`membership_granted_at`** meta: UTC timestamp of fulfillment
+
+Visible in **WP Admin → Members**. The Users list remains reserved for content authors and site admins.
+
+### JWT upgrade path still applies
+
+The cookie-based auth model (`member_token=stripe:<session_id>`) and the JWT upgrade described in Stage 2 above are **orthogonal to whether customers are WP users or CPT posts**. The JWT upgrade replaces the cookie value with a signed token — the membership store backing it can be either WP user meta or CPT post meta. The CPT approach actually simplifies the JWT upgrade: instead of looking up WP user meta, the `/api/auth/login` route would query the `member` CPT by email to verify an active membership before minting the token.
+
 ### JWT implementation detail
 
 The middleware currently does:
