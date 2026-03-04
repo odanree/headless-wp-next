@@ -101,30 +101,34 @@ export default function ArticleCard({ article, annualPass, isAuthenticated }: Ar
             Opacity-0 until mounted so localStorage rehydration never flashes.
             flex-col parent means no wrapping → no layout shift on mount. */}
         {annualPass && !isAuthenticated && (
-          <button
-            type="button"
-            className={[
-              'w-full text-center text-sm font-semibold py-2 px-4 rounded-lg whitespace-nowrap border',
-              alreadyInCart || added
-                ? 'bg-green-100 text-green-700 border-green-100 cursor-default'
-                : 'border-blue-600 text-blue-600 hover:bg-blue-50 transition-colors',
-            ].join(' ')}
-            onClick={handleAddToCart}
-            disabled={!mounted || alreadyInCart || added}
-            aria-label={
-              alreadyInCart
-                ? 'Annual Access Pass already in cart'
-                : `Purchase Annual Access Pass for ${annualPass.price}`
-            }
-          >
-            <span className={`transition-opacity duration-150 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
-              {alreadyInCart
-                ? '✓ In Cart'
-                : added
-                ? '✓ Added!'
-                : `Purchase Access — ${annualPass.price}/yr`}
-            </span>
-          </button>
+          alreadyInCart ? (
+            <Link
+              href="/cart"
+              className="w-full text-center text-sm font-semibold py-2 px-4 rounded-lg whitespace-nowrap border bg-green-100 text-green-700 border-green-100 hover:bg-green-200 transition-colors"
+              aria-label="Go to cart"
+            >
+              <span className={`transition-opacity duration-150 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
+                Go To Cart →
+              </span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              className={[
+                'w-full text-center text-sm font-semibold py-2 px-4 rounded-lg whitespace-nowrap border',
+                added
+                  ? 'bg-green-100 text-green-700 border-green-100 cursor-default'
+                  : 'border-blue-600 text-blue-600 hover:bg-blue-50 transition-colors',
+              ].join(' ')}
+              onClick={handleAddToCart}
+              disabled={!mounted || added}
+              aria-label={`Purchase Annual Access Pass for ${annualPass.price}`}
+            >
+              <span className={`transition-opacity duration-150 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
+                {added ? '✓ Added!' : `Purchase Access — ${annualPass.price}/yr`}
+              </span>
+            </button>
+          )
         )}
       </div>
     </article>
