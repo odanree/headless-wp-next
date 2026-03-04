@@ -133,6 +133,18 @@ In mock mode (no `WORDPRESS_URL` set), the Vercel deployment works out of the bo
 
 > These are the decisions worth articulating in an interview — not just "what did you build" but "why did you build it this way."
 
+### Demo vs. production membership: cookie simulation → JWT entitlement
+
+The membership gate in this repo uses a verified Stripe session to set an httpOnly cookie — real server-side verification, but the access grant lives only in the browser. The production upgrade path moves to a **webhook-driven entitlement system** where:
+
+1. `checkout.session.completed` writes membership status to WordPress User Meta (the IdP)
+2. Login mints a signed JWT embedding membership claims + expiry
+3. `middleware.ts` verifies the JWT at the Edge in ~0.1 ms — no database round-trip
+
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the full two-stage design, a side-by-side security comparison, and interview talking points on JWT revocation, PCI scope, and why the webhook is the source of truth.
+
+---
+
 ### Why REST over GraphQL?
 
 Chosen for this PoC to demonstrate **native WordPress capability without installing a third-party plugin**. The WP REST API ships with every WordPress install since 4.7 — zero additional dependencies.
