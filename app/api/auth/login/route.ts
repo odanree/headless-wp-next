@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   // In live mode this would be the real WORDPRESS_API_TOKEN.
   const token = process.env.WORDPRESS_API_TOKEN ?? 'demo-member-token';
 
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = (process.env.NODE_ENV as string) === 'production';
 
   const cookieStore = cookies();
   cookieStore.set('member_token', token, {

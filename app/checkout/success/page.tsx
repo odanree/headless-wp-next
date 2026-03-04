@@ -58,7 +58,7 @@ export default async function CheckoutSuccessPage({ searchParams }: PageProps) {
 
   // Mint the member_token cookie — same httpOnly/SameSite pattern as /api/auth/login
   // Value encodes the Stripe session so it's auditable without a DB
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = (process.env.NODE_ENV as string) === 'production';
   const cookieStore = cookies();
   cookieStore.set('member_token', `stripe:${session.id}`, {
     httpOnly: true,

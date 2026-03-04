@@ -51,7 +51,9 @@
 import type { WooProduct, WooCart, WooCartItem, RawStoreCart } from '@/types/woocommerce';
 import { MOCK_PRODUCTS, MOCK_EMPTY_CART, getMockProductById } from './woo-mock-data';
 
-const BASE_URL = process.env.WORDPRESS_URL; // e.g. https://cms.example.com
+// Separate from WORDPRESS_URL so a project can have a WP articles CMS without
+// WooCommerce installed (env unset → silent mock fallback, no 404 errors).
+const BASE_URL = process.env.WOOCOMMERCE_URL; // e.g. https://shop.example.com
 const STORE_API = `${BASE_URL}/wp-json/wc/store/v1`;
 
 // ─── Price helpers ─────────────────────────────────────────────────────────────
