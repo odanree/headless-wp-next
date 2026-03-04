@@ -112,7 +112,7 @@ STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"${TEST_EMAIL}2\",\"stripe_session_id\":\"cs_verify_test_2\"}" \
   "${WP_BASE}/wp-json/headless/v1/grant-membership")
-check "grant-membership endpoint (Bearer token)" "$STATUS" "$BODY" "success"
+check "grant-membership endpoint (Bearer token)" "$STATUS" "$BODY" "granted"
 
 # ── 6. Next.js is up ──────────────────────────────────────────────────────────
 echo ""
