@@ -29,6 +29,14 @@ import { NextResponse } from 'next/server';
  *   Nonce never appears in browser JS or any response visible to XSS.
  */
 export async function POST(request: Request) {
+  // Demo login is intentionally disabled in production.
+  // In production, membership is granted exclusively via Stripe Checkout
+  // (see app/checkout/success/page.tsx). Keeping this endpoint live in
+  // production would allow password-based bypass of the payment gate.
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   const body = await request.json().catch(() => null);
 
   if (!body?.username || !body?.password) {
@@ -38,7 +46,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const expectedPassword = process.env.DEMO_MEMBER_PASSWORD ?? 'members-only-2026';
+  // No hardcoded fallback — if DEMO_MEMBER_PASSWORD is not set in .env.local,
+  // refuse rather than silently accept a guessable default.
+  const expectedPassword = process.env.DEMO_MEMBER_PASSWORD;
+  if (!expectedPassword) {
+    return NextResponse.json(
+      { error: 'Demo login is not configured' },
+      { status: 503 },
+    );
+  }
 
   if (body.password !== expectedPassword) {
     // Constant-time-ish delay to avoid enumeration timing
