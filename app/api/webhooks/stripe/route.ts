@@ -100,8 +100,8 @@ export async function POST(request: NextRequest) {
             const body = await res.text();
             console.error(`[webhook] WP grant-membership failed (${res.status}):`, body);
           } else {
-            const data = await res.json() as { user_id: number; email: string; granted: boolean };
-            console.log('[webhook] Membership granted — WP user_id:', data.user_id, '| email:', data.email);
+            const data = await res.json() as { member_id: number; email: string; granted: boolean };
+            console.log('[webhook] Membership granted — WP member_id:', data.member_id, '| email:', data.email);
           }
         } catch (err) {
           console.error('[webhook] Failed to reach WP grant-membership endpoint:', err);
