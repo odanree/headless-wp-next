@@ -6,7 +6,7 @@
 // to the card level (RSC islands pattern).
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useCart } from '@/contexts/CartContext';
 import type { ArticleSummary } from '@/types/wordpress';
 import type { WooProduct } from '@/types/woocommerce';
@@ -20,10 +20,14 @@ interface ArticleCardProps {
 export default function ArticleCard({ article, annualPass }: ArticleCardProps) {
   const { addProductToCart, state } = useCart();
   const [added, setAdded] = useState(false);
+  // Guard against hydration mismatch: cart is rehydrated from localStorage on
+  // the client. Suppress cart-derived state until after first render so the
+  // server and client HTML are identical on the initial pass.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
-  // Check if this product is already in the cart
   const alreadyInCart =
-    annualPass != null && state.cart.items.some((i) => i.id === annualPass.id);
+    mounted && annualPass != null && state.cart.items.some((i) => i.id === annualPass.id);
 
   function handleAddToCart() {
     if (!annualPass || alreadyInCart) return;
