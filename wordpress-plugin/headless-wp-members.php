@@ -63,6 +63,21 @@ function hwp_register_rest_routes(): void {
             ],
         ],
     ] );
+
+    // GET /wp-json/headless/v1/articles/public
+    // Public teaser endpoint — no auth required.
+    // Returns title, excerpt, date, readTime, category for the home page.
+    // Full content is intentionally omitted — only authenticated members
+    // (via /articles and /articles/{id}) can access it.
+    register_rest_route( $namespace, '/articles/public', [
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'hwp_get_public_articles',
+        'permission_callback' => '__return_true',
+        'args'                => [
+            'page'     => [ 'default' => 1,  'sanitize_callback' => 'absint' ],
+            'per_page' => [ 'default' => 10, 'sanitize_callback' => 'absint' ],
+        ],
+    ] );
 }
 
 // ─── Permission callback ──────────────────────────────────────────────────────
@@ -118,6 +133,33 @@ function hwp_get_articles( WP_REST_Request $request ): WP_REST_Response {
     return $response;
 }
 
+function hwp_get_public_articles( WP_REST_Request $request ): WP_REST_Response {
+    $page     = $request->get_param( 'page' );
+    $per_page = min( $request->get_param( 'per_page' ), 100 );
+
+    $query = new WP_Query( [
+        'post_type'      => 'member_article',
+        'post_status'    => 'publish',
+        'posts_per_page' => $per_page,
+        'paged'          => $page,
+        'orderby'        => 'date',
+        'order'          => 'DESC',
+    ] );
+
+    $articles = array_map( 'hwp_format_article_teaser', $query->posts );
+
+    $response = new WP_REST_Response( [
+        'articles'   => $articles,
+        'total'      => (int) $query->found_posts,
+        'totalPages' => (int) $query->max_num_pages,
+    ], 200 );
+
+    $response->header( 'X-WP-Total',      (string) $query->found_posts );
+    $response->header( 'X-WP-TotalPages', (string) $query->max_num_pages );
+
+    return $response;
+}
+
 function hwp_get_article( WP_REST_Request $request ): WP_REST_Response|WP_Error {
     $post = get_post( $request->get_param( 'id' ) );
 
@@ -150,6 +192,24 @@ function hwp_format_article( WP_Post $post ): array {
 function hwp_estimate_read_time( string $content ): int {
     $word_count = str_word_count( wp_strip_all_tags( $content ) );
     return max( 1, (int) ceil( $word_count / 200 ) ); // ~200 wpm
+}
+
+// Teaser serializer — omits full content so unauthenticated callers
+// can render the public listing without access to member-only body text.
+function hwp_format_article_teaser( WP_Post $post ): array {
+    $read_time = (int) get_post_meta( $post->ID, 'read_time', true );
+    $category  = (string) get_post_meta( $post->ID, 'article_category', true );
+
+    return [
+        'id'       => $post->ID,
+        'slug'     => $post->post_name,
+        'title'    => wp_strip_all_tags( $post->post_title ),
+        'excerpt'  => wp_strip_all_tags( $post->post_excerpt ?: wp_trim_words( $post->post_content, 30 ) ),
+        'date'     => get_the_date( 'c', $post ),
+        'readTime' => $read_time ?: hwp_estimate_read_time( $post->post_content ),
+        'category' => $category ?: 'General',
+        // 'content' deliberately excluded — full body requires Bearer token auth
+    ];
 }
 
 // ─── On-demand revalidation trigger ──────────────────────────────────────────

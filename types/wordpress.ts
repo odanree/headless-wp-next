@@ -22,3 +22,9 @@ export type ArticleSummary = Pick<
   WordPressArticle,
   'id' | 'slug' | 'title' | 'excerpt' | 'date' | 'readTime' | 'category'
 >;
+
+export interface ArticleSummaryResponse {
+  articles: ArticleSummary[];
+  total: number;
+  totalPages: number;
+}

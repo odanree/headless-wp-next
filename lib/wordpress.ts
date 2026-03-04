@@ -28,7 +28,7 @@
  */
 
 import { revalidateTag } from 'next/cache';
-import type { WordPressArticle, WordPressArticlesResponse } from '@/types/wordpress';
+import type { WordPressArticle, WordPressArticlesResponse, ArticleSummaryResponse } from '@/types/wordpress';
 import { getMockArticles, getMockArticleById } from '@/lib/mock-data';
 
 export { revalidateTag };
@@ -164,7 +164,7 @@ export async function getMemberArticleById(
  *  - Higher TTL (3600 vs 300) → fewer cold WP PHP hits at scale
  *  - Returns same mock data in dev so the /articles page always has content
  */
-export async function getPublicArticles(): Promise<WordPressArticlesResponse> {
+export async function getPublicArticles(): Promise<ArticleSummaryResponse> {
   if (!process.env.WORDPRESS_URL) {
     // Mock mode — return the same articles as member mode (all articles are
     // "public teasers" in the mock; in production the WP endpoint would filter
@@ -172,7 +172,7 @@ export async function getPublicArticles(): Promise<WordPressArticlesResponse> {
     return getMockArticles();
   }
 
-  return wpFetch<WordPressArticlesResponse>('/articles/public', {
+  return wpFetch<ArticleSummaryResponse>('/articles/public', {
     revalidate: 3600,
     tags: ['public-articles'],
   });
