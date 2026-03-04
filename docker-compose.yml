@@ -1,0 +1,65 @@
+# Local WordPress stack for headless-wp-next development
+#
+# Usage:
+#   docker compose up -d
+#   open http://localhost:8080  → complete WP install wizard
+#   Then run:  ./scripts/wp-setup.sh  (or follow README steps)
+#
+# Ports:
+#   8080  → WordPress admin + REST API
+#   3306  → MySQL (exposed for optional direct DB access)
+#
+# Volumes persist data between restarts. To start fresh:
+#   docker compose down -v
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wp
+      MYSQL_PASSWORD: wp
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "wp", "-pwp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  wordpress:
+    image: wordpress:6.7-php8.3-apache
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp
+      WORDPRESS_DB_NAME: wordpress
+      # Sets HEADLESS_API_TOKEN in wp-config.php automatically.
+      # Must match WORDPRESS_API_TOKEN in your .env.local
+      WORDPRESS_CONFIG_EXTRA: |
+        define( 'HEADLESS_API_TOKEN', 'local-dev-token' );
+        define( 'NEXT_REVALIDATE_URL', 'http://localhost:3004/api/revalidate' );
+        define( 'REVALIDATION_SECRET', 'local-revalidate-secret' );
+    volumes:
+      - wp_data:/var/www/html
+      # Auto-installs the headless plugin — no manual upload needed
+      - ./wordpress-plugin/headless-wp-members.php:/var/www/html/wp-content/plugins/headless-wp-members/headless-wp-members.php:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/wp-login.php"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  db_data:
+  wp_data:
