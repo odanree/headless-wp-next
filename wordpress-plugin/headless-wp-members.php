@@ -109,6 +109,32 @@ function hwp_register_rest_routes(): void {
             'stripe_session_id' => [ 'required' => true,  'sanitize_callback' => 'sanitize_text_field' ],
         ],
     ] );
+
+    // POST /wp-json/headless/v1/set-password
+    // Called after a successful Stripe payment to let the member set a password
+    // for future logins. Stores a bcrypt hash in member_password_hash meta.
+    register_rest_route( $namespace, '/set-password', [
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => 'hwp_set_password',
+        'permission_callback' => 'hwp_check_bearer_token',
+        'args'                => [
+            'email'    => [ 'required' => true, 'sanitize_callback' => 'sanitize_email' ],
+            'password' => [ 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ],
+        ],
+    ] );
+
+    // POST /wp-json/headless/v1/verify-credentials
+    // Called by the Next.js login route to authenticate a returning member.
+    // Returns { valid: true, session_id } on success, { valid: false } on failure.
+    register_rest_route( $namespace, '/verify-credentials', [
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => 'hwp_verify_credentials',
+        'permission_callback' => 'hwp_check_bearer_token',
+        'args'                => [
+            'email'    => [ 'required' => true, 'sanitize_callback' => 'sanitize_email' ],
+            'password' => [ 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ],
+        ],
+    ] );
 }
 
 // ─── Permission callback ──────────────────────────────────────────────────────
@@ -330,5 +356,58 @@ function hwp_grant_membership( WP_REST_Request $request ): WP_REST_Response|WP_E
         'member_id' => $member_id,
         'email'     => $email,
         'granted'   => true,
+    ], 200 );
+}
+
+// ─── Password management ──────────────────────────────────────────────────────
+
+function hwp_set_password( WP_REST_Request $request ): WP_REST_Response|WP_Error {
+    $email    = $request->get_param( 'email' );
+    $password = $request->get_param( 'password' );
+
+    if ( strlen( $password ) < 8 ) {
+        return new WP_Error( 'password_too_short', 'Password must be at least 8 characters.', [ 'status' => 400 ] );
+    }
+
+    $existing = get_posts( [
+        'post_type'   => 'member',
+        'post_status' => 'publish',
+        'numberposts' => 1,
+        'meta_query'  => [ [ 'key' => 'member_email', 'value' => $email ] ],
+    ] );
+
+    if ( ! $existing ) {
+        return new WP_Error( 'member_not_found', 'No member found for this email.', [ 'status' => 404 ] );
+    }
+
+    update_post_meta( $existing[0]->ID, 'member_password_hash', password_hash( $password, PASSWORD_BCRYPT ) );
+
+    return new WP_REST_Response( [ 'ok' => true ], 200 );
+}
+
+function hwp_verify_credentials( WP_REST_Request $request ): WP_REST_Response {
+    $email    = $request->get_param( 'email' );
+    $password = $request->get_param( 'password' );
+
+    $existing = get_posts( [
+        'post_type'   => 'member',
+        'post_status' => 'publish',
+        'numberposts' => 1,
+        'meta_query'  => [ [ 'key' => 'member_email', 'value' => $email ] ],
+    ] );
+
+    if ( ! $existing ) {
+        return new WP_REST_Response( [ 'valid' => false ], 200 );
+    }
+
+    $hash = get_post_meta( $existing[0]->ID, 'member_password_hash', true );
+
+    if ( ! $hash || ! password_verify( $password, $hash ) ) {
+        return new WP_REST_Response( [ 'valid' => false ], 200 );
+    }
+
+    return new WP_REST_Response( [
+        'valid'      => true,
+        'session_id' => (string) get_post_meta( $existing[0]->ID, 'stripe_session_id', true ),
     ], 200 );
 }
