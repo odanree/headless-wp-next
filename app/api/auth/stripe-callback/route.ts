@@ -48,12 +48,12 @@ export async function GET(request: NextRequest) {
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
-  // Pass email to the success page as a query param for personalised display.
+  // Redirect to set-password so the member can create credentials for future logins.
   // Email is not sensitive here — it was already shown on the Stripe hosted page.
   const email = session.customer_details?.email ?? '';
-  const successUrl = email
-    ? `/checkout/success?email=${encodeURIComponent(email)}`
-    : '/checkout/success';
+  const nextUrl = email
+    ? `/checkout/set-password?email=${encodeURIComponent(email)}`
+    : '/checkout/set-password';
 
-  redirect(successUrl);
+  redirect(nextUrl);
 }
