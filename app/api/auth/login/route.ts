@@ -4,11 +4,14 @@ import { NextResponse } from 'next/server';
 /**
  * POST /api/auth/login
  *
- * Body: { username: string; password: string }
+ * Body: { username: string (email); password: string }
  *
- * On success → sets httpOnly member_token cookie and returns { ok: true }.
- * The cookie value is the WORDPRESS_API_TOKEN (or a fixed demo token in
- * mock mode). It never appears in JS — only in the browser's cookie jar.
+ * In production: verifies credentials against the WordPress member record
+ * via POST /wp-json/headless/v1/verify-credentials. On success, re-issues
+ * the member_token cookie (stripe:<session_id>) for a 7-day session.
+ *
+ * In development (WORDPRESS_URL not set): falls back to DEMO_MEMBER_PASSWORD
+ * for local testing without a live WordPress instance.
  *
  * WOOCOMMERCE NONCE — CART SESSION BINDING + CSRF MITIGATION
  *   The WooCommerce Store API uses a nonce primarily for *cart session binding*:
@@ -29,14 +32,6 @@ import { NextResponse } from 'next/server';
  *   Nonce never appears in browser JS or any response visible to XSS.
  */
 export async function POST(request: Request) {
-  // Demo login is intentionally disabled in production.
-  // In production, membership is granted exclusively via Stripe Checkout
-  // (see app/checkout/success/page.tsx). Keeping this endpoint live in
-  // production would allow password-based bypass of the payment gate.
-  if (process.env.NODE_ENV === 'production') {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
   const body = await request.json().catch(() => null);
 
   if (!body?.username || !body?.password) {
@@ -46,27 +41,55 @@ export async function POST(request: Request) {
     );
   }
 
-  // No hardcoded fallback — if DEMO_MEMBER_PASSWORD is not set in .env.local,
-  // refuse rather than silently accept a guessable default.
-  const expectedPassword = process.env.DEMO_MEMBER_PASSWORD;
-  if (!expectedPassword) {
-    return NextResponse.json(
-      { error: 'Demo login is not configured' },
-      { status: 503 },
-    );
-  }
-
-  if (body.password !== expectedPassword) {
-    // Constant-time-ish delay to avoid enumeration timing
-    await new Promise((r) => setTimeout(r, 300));
-    return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-  }
-
-  // In mock mode we issue a fixed demo token.
-  // In live mode this would be the real WORDPRESS_API_TOKEN.
-  const token = process.env.WORDPRESS_API_TOKEN ?? 'demo-member-token';
-
   const isProduction = (process.env.NODE_ENV as string) === 'production';
+  const wpUrl = process.env.WORDPRESS_URL;
+  const wpToken = process.env.WORDPRESS_API_TOKEN;
+
+  let memberSessionId: string | null = null;
+
+  if (wpUrl && wpToken) {
+    // Live mode — verify against the WordPress member record.
+    const res = await fetch(`${wpUrl}/wp-json/headless/v1/verify-credentials`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${wpToken}`,
+      },
+      body: JSON.stringify({ email: body.username, password: body.password }),
+    });
+
+    if (!res.ok) {
+      await new Promise((r) => setTimeout(r, 300));
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    const data = await res.json() as { valid: boolean; session_id?: string };
+
+    if (!data.valid) {
+      await new Promise((r) => setTimeout(r, 300));
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    memberSessionId = data.session_id ?? null;
+  } else {
+    // Dev/mock mode — use DEMO_MEMBER_PASSWORD env var.
+    const expectedPassword = process.env.DEMO_MEMBER_PASSWORD;
+    if (!expectedPassword) {
+      return NextResponse.json(
+        { error: 'Demo login is not configured' },
+        { status: 503 },
+      );
+    }
+
+    if (body.password !== expectedPassword) {
+      await new Promise((r) => setTimeout(r, 300));
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+  }
+
+  const token = memberSessionId
+    ? `stripe:${memberSessionId}`
+    : (process.env.WORDPRESS_API_TOKEN ?? 'demo-member-token');
 
   const cookieStore = cookies();
   cookieStore.set('member_token', token, {
