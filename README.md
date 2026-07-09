@@ -132,7 +132,9 @@ WP Admin → **Member Articles** → Add New. The `article_category` and `read_t
 
 ---
 
-## Deploying to Vercel
+## Deploying
+
+### Vercel (Next.js frontend)
 
 1. Push to GitHub
 2. **Vercel → Add New Project** → import the repo
@@ -141,6 +143,16 @@ WP Admin → **Member Articles** → Add New. The `article_category` and `read_t
 5. Deploy
 
 In mock mode (no `WORDPRESS_URL` set), the Vercel deployment works out of the box.
+
+### DigitalOcean (WordPress backend)
+
+The WordPress side of a live deployment runs on a DigitalOcean droplet — LEMP stack with the `headless-wp-members.php` plugin dropped into `wp-content/plugins/`. Vercel is the front, DigitalOcean is the back; the two talk over the WP REST API with a Bearer token stored server-side.
+
+The plugin uses **blocking `wp_remote_post`** for revalidation calls so PHP-FPM guarantees the request is delivered before returning — non-blocking left the ISR cache stale intermittently under load.
+
+### Password-based re-login (returning members)
+
+A returning customer whose Stripe cookie has expired can re-authenticate with a password set at checkout ([`app/checkout/set-password/`](app/checkout/set-password/) + [`app/api/auth/set-password/`](app/api/auth/set-password/route.ts)), which issues a fresh httpOnly cookie without another Stripe round-trip.
 
 ---
 
@@ -217,7 +229,9 @@ The customer's credentials never touch client-side JS at any step.
 
 ---
 
-### ADA / WCAG 2.1 compliance approach
+### Accessibility — Semantic HTML & ADA focus management
+
+Targets WCAG 2.1 AA-level patterns for the interactive surfaces; not third-party audited.
 
 - `aria-live="assertive"` on the login error region announces failures immediately to screen readers without requiring focus shift
 - `aria-busy` on the submit button signals to assistive technology that a network request is in-flight
