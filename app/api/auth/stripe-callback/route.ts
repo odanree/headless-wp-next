@@ -7,7 +7,7 @@ import Stripe from 'stripe';
 //
 // Stripe's success_url points here (not directly to /checkout/success) because
 // cookies().set() is only permitted in Route Handlers and Server Actions —
-// not in Server Component pages (Next.js 14 App Router constraint).
+// not in Server Component pages (Next.js App Router constraint).
 //
 // Flow:
 //   1. Stripe redirects to /api/auth/stripe-callback?session_id=cs_...
@@ -40,7 +40,8 @@ export async function GET(request: NextRequest) {
 
   // Set the httpOnly member_token cookie — Route Handler context allows this.
   const isProduction = (process.env.NODE_ENV as string) === 'production';
-  cookies().set('member_token', `stripe:${session.id}`, {
+  const cookieStore = await cookies();
+  cookieStore.set('member_token', `stripe:${session.id}`, {
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',

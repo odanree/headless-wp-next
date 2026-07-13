@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 import { getMemberArticleById, getMemberArticles } from '@/lib/wordpress';
 import { LogoutButton } from '../LogoutButton';
 
-type Props = { params: { id: string } };
+type Props = { params: Promise<{ id: string }> };
 
 // Allow paths not returned by generateStaticParams to be rendered on-demand.
 export const dynamicParams = true;
@@ -20,7 +20,8 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const article = await getMemberArticleById(Number(params.id));
+  const { id } = await params;
+  const article = await getMemberArticleById(Number(id));
   if (!article) return { title: 'Article not found' };
   return {
     title: article.title,
@@ -38,7 +39,8 @@ function formatDate(iso: string) {
 }
 
 export default async function ArticlePage({ params }: Props) {
-  const article = await getMemberArticleById(Number(params.id));
+  const { id } = await params;
+  const article = await getMemberArticleById(Number(id));
 
   if (!article) notFound();
 

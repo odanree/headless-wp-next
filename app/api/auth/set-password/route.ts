@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server';
  * The plaintext password travels over HTTPS only — never stored in Next.js.
  */
 export async function POST(request: Request) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get('member_token')?.value;
 
   if (!token || !token.startsWith('stripe:')) {

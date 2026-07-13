@@ -6,7 +6,7 @@ import ClearCartOnMount from './ClearCartOnMount';
 // Pure display page — no Stripe SDK, no cookie logic.
 //
 // Cookie is set upstream in GET /api/auth/stripe-callback (a Route Handler),
-// which is the only context where cookies().set() is permitted in Next.js 14
+// which is the only context where cookies().set() is permitted in the Next.js
 // App Router. That handler verifies the Stripe session, sets member_token,
 // then redirects here with ?email= for personalised display.
 
@@ -16,11 +16,11 @@ export const metadata: Metadata = {
 };
 
 interface PageProps {
-  searchParams: { email?: string };
+  searchParams: Promise<{ email?: string }>;
 }
 
 export default async function CheckoutSuccessPage({ searchParams }: PageProps) {
-  const email = searchParams.email ?? null;
+  const { email = null } = await searchParams;
 
   return (
     <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">

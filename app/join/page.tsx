@@ -6,14 +6,14 @@ export const metadata: Metadata = {
 };
 
 type Props = {
-  searchParams: { redirectBack?: string };
+  searchParams: Promise<{ redirectBack?: string }>;
 };
 
 /**
  * Server Component — reads redirectBack from URL props, passes it to the
  * Client Component form. No useSearchParams() / Suspense boundary needed.
  */
-export default function JoinPage({ searchParams }: Props) {
-  const redirectBack = searchParams.redirectBack ?? '/members';
+export default async function JoinPage({ searchParams }: Props) {
+  const { redirectBack = '/members' } = await searchParams;
   return <JoinForm redirectBack={redirectBack} />;
 }

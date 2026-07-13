@@ -86,5 +86,24 @@ export async function POST(request: Request) {
 
   tags.forEach((tag) => revalidateTag(tag));
 
+  // Also drop the same tags from the Varnish origin cache so both layers
+  // evict together. Fire-and-forget — a Varnish outage must not break edge
+  // revalidation. VARNISH_URL is the internal http URL (e.g. http://varnish
+  // in the compose network, or the internal LB in prod). Absent means the
+  // origin cache isn't wired up in this environment.
+  const varnishUrl = process.env.VARNISH_URL;
+  if (varnishUrl) {
+    for (const tag of tags) {
+      fetch(`${varnishUrl}/`, {
+        method: 'BAN',
+        headers: { 'X-Cache-Tag': tag },
+        cache: 'no-store',
+      }).catch(() => {
+        // Swallow — revalidateTag() already succeeded, Varnish will expire
+        // on its own 5m TTL as a fallback.
+      });
+    }
+  }
+
   return NextResponse.json({ revalidated: true, tags });
 }

@@ -7,10 +7,10 @@ export const metadata: Metadata = {
 };
 
 type Props = {
-  searchParams: { email?: string };
+  searchParams: Promise<{ email?: string }>;
 };
 
-export default function SetPasswordPage({ searchParams }: Props) {
-  const email = searchParams.email ?? '';
+export default async function SetPasswordPage({ searchParams }: Props) {
+  const { email = '' } = await searchParams;
   return <SetPasswordForm email={email} />;
 }
