@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server';
  * Expires the member_token cookie immediately.
  */
 export async function POST() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.set('member_token', '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

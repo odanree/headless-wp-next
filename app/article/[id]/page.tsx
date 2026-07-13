@@ -15,7 +15,7 @@ import { LogoutButton } from '@/app/members/LogoutButton';
 //   in app/layout.tsx so Googlebot knows where the gated content begins.
 //   See: https://developers.google.com/search/docs/appearance/structured-data/paywalled-content
 
-type Props = { params: { id: string } };
+type Props = { params: Promise<{ id: string }> };
 
 // Allow paths not returned by generateStaticParams to be rendered on-demand.
 // This means the build never hard-fails when WordPress is unreachable —
@@ -35,7 +35,8 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const article = await getMemberArticleById(Number(params.id));
+  const { id } = await params;
+  const article = await getMemberArticleById(Number(id));
   if (!article) return { title: 'Article not found' };
   return {
     title: article.title,
@@ -53,7 +54,8 @@ function formatDate(iso: string) {
 }
 
 export default async function ArticlePage({ params }: Props) {
-  const article = await getMemberArticleById(Number(params.id));
+  const { id } = await params;
+  const article = await getMemberArticleById(Number(id));
 
   if (!article) notFound();
 

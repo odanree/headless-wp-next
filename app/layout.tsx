@@ -9,11 +9,12 @@ export const metadata: Metadata = {
     default: 'Headless WP',
     template: '%s | Headless WP',
   },
-  description: 'Next.js 14 + WordPress REST API — headless CMS demo',
+  description: 'Next.js 15 + WordPress REST API — headless CMS demo',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = !!cookies().get('member_token')?.value;
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const isAuthenticated = !!cookieStore.get('member_token')?.value;
   return (
     <html lang="en">
       <body>

@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     ? `stripe:${memberSessionId}`
     : (process.env.WORDPRESS_API_TOKEN ?? 'demo-member-token');
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.set('member_token', token, {
     httpOnly: true,
     secure: isProduction,
