@@ -15,6 +15,7 @@ import { cookies } from 'next/headers';
 import { getPublicArticles } from '@/lib/wordpress';
 import { getProducts } from '@/lib/woocommerce';
 import ArticleCard from './ArticleCard';
+import HeroCopy from './HeroCopy';
 
 // Dynamic — reads cookies() to detect auth state for the purchase CTA.
 // Article data fetches are ISR-cached independently via wpFetch tags.
@@ -71,14 +72,8 @@ export default async function HomePage() {
         }}
       />
 
-      <div className="mb-10">
-        <h1 className="text-3xl font-extrabold text-gray-900 mb-2">Member Articles</h1>
-        <p className="text-base text-gray-500 max-w-2xl">
-          Deep dives into headless CMS architecture, edge authentication, ISR, and more.
-          <br />
-          Preview titles and abstracts — full access requires membership.
-        </p>
-      </div>
+      {/* Edge-bucketed hero copy — see lib/experiments.ts + middleware.ts. */}
+      <HeroCopy />
 
       {annualPass && (
         <div className="flex flex-wrap items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-5 py-3 mb-8 text-sm">
