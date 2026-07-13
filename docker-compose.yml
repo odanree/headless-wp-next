@@ -7,7 +7,7 @@
 #
 # Ports:
 #   8080  → WordPress admin + REST API (direct, bypasses cache)
-#   8081  → Varnish 7.3 origin page cache in front of WordPress (5m TTL + 60s grace)
+#   8081  → Varnish 7.1 origin page cache in front of WordPress (5m TTL + 60s grace)
 #   3306  → MySQL (exposed for optional direct DB access)
 #
 # Point WORDPRESS_URL in .env.local at http://localhost:8081 to route the
@@ -65,13 +65,13 @@ services:
       timeout: 5s
       retries: 10
 
-  # ─── Varnish 7.3 origin page cache ──────────────────────────────────────────
+  # ─── Varnish 7.1 origin page cache ──────────────────────────────────────────
   # The same shape production headless stacks run behind their multi-CDN:
   # origin-side request coalescing + grace mode so a TTL expiry never
   # stampedes MySQL. Purge is ACL-gated to the docker network + localhost
   # — see varnish/default.vcl.
   varnish:
-    image: varnish:7.3-alpine
+    image: varnish:7.1-alpine
     restart: unless-stopped
     depends_on:
       wordpress:
@@ -82,8 +82,11 @@ services:
       VARNISH_SIZE: 128m
     volumes:
       - ./varnish/default.vcl:/etc/varnish/default.vcl:ro
-    tmpfs:
-      - /var/lib/varnish:exec
+    # /var/lib/varnish stays on the container's writable layer (not tmpfs).
+    # varnishd runs as the unprivileged `varnish` user in this image; a
+    # bare `tmpfs: /var/lib/varnish` mount is root-owned mode 1777 and
+    # varnishd refuses to create its per-instance workdir there. The image
+    # already sets correct ownership on /var/lib/varnish — leave it alone.
 
 volumes:
   db_data:

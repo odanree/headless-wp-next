@@ -1,22 +1,26 @@
 vcl 4.1;
 
-# Varnish 7.1 origin page cache for the headless-wp-next WordPress backend.
-# Sits between Next.js (fetch client) and Apache — the same shape
-# production headless stacks run behind their CDN layer: origin-side
-# coalescing + grace so a TTL expiry never stampedes MySQL.
+# Varnish 7.1 origin page cache — PRODUCTION topology (Hetzner VPS).
+# Same policy as varnish/default.vcl; only the backend block differs.
+# See .github/workflows/deploy-varnish-hetzner.yml — this file is what
+# GitHub Actions scps to /etc/varnish/default.vcl on the VPS.
 #
 # Layering, top-down:
 #
 #   Vercel Edge (Next.js ISR, per-tag)
 #        ↓ POST /api/revalidate → fires PURGE here
-#   Varnish 7.1  (this file)  ← grace 60s, coalescing on, PURGE ACL
-#        ↓ backend `wp`
+#   Varnish 7.1  (this file, listening on :80 on the Hetzner VPS)
+#        ↓ backend `wp` = Apache on the same host, loopback :8080
 #   Apache + WordPress
 #        ↓ Redis object cache (L1 in the WP process)
 #        ↓ MySQL (writes only under normal load)
 
 import std;
 
+# Backend = portfolio-wordpress container on the shared portfolio-net.
+# Docker DNS resolves `wordpress` to the WP container's network IP. Same
+# service-discovery-via-container-name shape that portfolio-caddy already
+# uses. No host-loopback hop; both containers on the same L2 network.
 backend wp {
     .host = "wordpress";
     .port = "80";
@@ -25,14 +29,19 @@ backend wp {
     .between_bytes_timeout = 5s;
 }
 
-# PURGE is only allowed from the docker-compose private network + localhost.
-# Never expose Varnish's admin port publicly — this ACL is the trust boundary.
+# PURGE/BAN reach Varnish through portfolio-caddy (the L7 edge). Caddy
+# forwards the request with its own docker-network IP as the source, so
+# the ACL accepts RFC1918 ranges that Docker default bridge networks use.
+# This is a routing-level trust boundary — the real authenticity check
+# lives one layer up: Next.js /api/revalidate verifies a shared secret
+# before firing the BAN, and Caddy (public-facing) is the only path into
+# the docker network from outside.
 acl purgers {
     "127.0.0.1";
     "localhost";
-    "172.16.0.0"/12;   # docker default bridge range
-    "10.0.0.0"/8;      # kubernetes overlays if we ever hoist this
-    "192.168.0.0"/16;
+    "172.16.0.0"/12;    # docker default bridge range (covers portfolio-net + friends)
+    "10.0.0.0"/8;       # overlay / swarm networks if this stack ever hoists there
+    "192.168.0.0"/16;   # user-defined bridge networks
 }
 
 sub vcl_recv {

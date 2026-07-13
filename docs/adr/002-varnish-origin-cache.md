@@ -59,3 +59,5 @@ Both layers evict in lockstep. A Varnish outage falls through to the 5m TTL as a
 - Varnish 7.3 VCL reference: https://varnish-cache.org/docs/7.3/reference/vcl.html
 - Reference architecture reconstruction notes: `../architecture-notes.md` (private)
 - Layered cache flow diagram (inline in `app/api/revalidate/route.ts` docstring)
+- Prod deploy runbook: [`../runbooks/hetzner-varnish-bootstrap.md`](../runbooks/hetzner-varnish-bootstrap.md)
+- Deploy workflow: [`.github/workflows/deploy-varnish-hetzner.yml`](../../.github/workflows/deploy-varnish-hetzner.yml)

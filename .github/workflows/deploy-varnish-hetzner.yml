@@ -1,0 +1,174 @@
+name: Deploy Varnish VCL to Hetzner (docker exec)
+
+# ─── Trigger ─────────────────────────────────────────────────────────────────
+# Path-filter: only runs when the VCL, this workflow, or the bootstrap runbook
+# changes. README-only, app/*, or lib/* pushes don't fire it — no CI noise for
+# work that doesn't touch the origin cache.
+#
+# Adds workflow_dispatch as a manual escape hatch (initial bootstrap, forced
+# reloads, redeploy after Hetzner-side ops changes).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'varnish/**'
+      - '.github/workflows/deploy-varnish-hetzner.yml'
+      - 'docs/runbooks/hetzner-varnish-bootstrap.md'
+  workflow_dispatch:
+    inputs:
+      force_container_restart:
+        description: 'docker compose restart varnish (instead of hot vcl.load) — use if VMOD/config-shape changed'
+        required: false
+        default: 'false'
+
+concurrency:
+  # One deploy at a time per branch. Superseded runs are cancelled so we never
+  # queue up two competing vcl.load calls if pushes land back-to-back.
+  group: hetzner-varnish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: docker cp VCL + varnishadm hot-reload
+    runs-on: ubuntu-latest
+    # Restrict who can trigger — deploy-secret access only for master pushes
+    # by repo maintainers. workflow_dispatch inherits the same check.
+    environment: hetzner-prod
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Only need the VCL file — shallow clone is fine and faster.
+          fetch-depth: 1
+
+      - name: Validate VCL locally with varnishd -Cf
+        # Fails the job before touching Hetzner if the VCL has a syntax error.
+        # Pinned to varnish:7.1-alpine to match the container image running
+        # on the VPS (portfolio-varnish, defined in odanree/portfolio-infra
+        # docker-compose). Bump both together if the container upgrades.
+        #
+        # Note: the backend `.host = "wordpress"` won't resolve from inside
+        # this validator container (no docker-compose network here). That's
+        # fine — varnishd -Cf compiles VCL to C without resolving backends;
+        # DNS resolution happens at vcl.load time on the VPS, where the
+        # portfolio-net network makes `wordpress` resolvable.
+        run: |
+          docker run --rm -v "${{ github.workspace }}/varnish:/etc/varnish:ro" \
+            varnish:7.1-alpine varnishd -Cf /etc/varnish/hetzner.vcl > /dev/null
+          echo "✓ VCL syntax valid"
+
+      - name: Copy VCL to Hetzner staging path
+        # scp-action carries the deploy key as an in-memory secret; the key
+        # never lands on the runner's disk. Uses the strict host-key check
+        # against HETZNER_HOST_FINGERPRINT so a compromised DNS record can't
+        # MITM the transfer.
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          fingerprint: ${{ secrets.HETZNER_HOST_FINGERPRINT }}
+          port: ${{ secrets.HETZNER_SSH_PORT || 22 }}
+          source: 'varnish/hetzner.vcl'
+          # Staging path outside any bind-mount — the ssh step below
+          # `docker cp`s from here into the portfolio-varnish container.
+          target: '/tmp/varnish-deploy'
+          strip_components: 1
+          overwrite: true
+
+      - name: Hot-reload portfolio-varnish via varnishadm
+        # Deploy transport: docker cp into the running portfolio-varnish
+        # container (defined in odanree/portfolio-infra), then varnishadm
+        # vcl.load/vcl.use via docker exec. No host-level Varnish involved
+        # — the container image and its admin socket are the only Varnish
+        # on the box.
+        #
+        # Failure mode: if varnishadm vcl.load rejects the VCL, the running
+        # VCL label stays active — no dropped traffic. The step exits
+        # non-zero and the workflow fails.
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          fingerprint: ${{ secrets.HETZNER_HOST_FINGERPRINT }}
+          port: ${{ secrets.HETZNER_SSH_PORT || 22 }}
+          # Fail-fast via `set -euo pipefail` at the top of the remote script.
+          script: |
+            set -euo pipefail
+            VCL_LABEL="deploy-$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA:0:8}"
+            STAGE=/tmp/varnish-deploy/hetzner.vcl
+            CONTAINER_PATH=/etc/varnish/hot.vcl
+
+            # Confirm portfolio-varnish is running before touching it.
+            if ! docker ps --format '{{.Names}}' | grep -qx portfolio-varnish; then
+              echo "✗ portfolio-varnish container not running" >&2
+              exit 1
+            fi
+
+            # Escape hatch: workflow_dispatch with force_container_restart=true
+            # writes the VCL to the bind-mounted bootstrap slot (owned by
+            # portfolio-infra) and restarts the container. Used for VMOD
+            # changes hot-reload can't accept.
+            if [ "${{ github.event.inputs.force_container_restart || 'false' }}" = "true" ]; then
+              echo "→ workflow_dispatch requested container restart path"
+              # In this case, the operator has to sync the change into
+              # portfolio-infra/varnish/bootstrap.vcl themselves — this
+              # step just restarts to pick up whatever's bind-mounted.
+              docker compose -f /opt/portfolio-infra/docker-compose.yml restart varnish
+              docker exec portfolio-varnish varnishadm vcl.list
+              exit 0
+            fi
+
+            # Copy the staged VCL into the container's own writable layer.
+            # /etc/varnish/hot.vcl is not bind-mounted, so this doesn't
+            # collide with the portfolio-infra-owned bootstrap.vcl at
+            # /etc/varnish/default.vcl.
+            docker cp "$STAGE" "portfolio-varnish:$CONTAINER_PATH"
+
+            # Fresh in-container syntax check against the actually-loaded
+            # varnishd (catches VMOD availability differences the local
+            # validator can't).
+            docker exec portfolio-varnish varnishd -Cf "$CONTAINER_PATH" > /dev/null
+            echo "✓ container varnishd accepts the VCL"
+
+            # Hot-reload. vcl.load compiles + loads; vcl.use flips the
+            # active label. Failed load leaves the running VCL untouched.
+            docker exec portfolio-varnish varnishadm vcl.load "$VCL_LABEL" "$CONTAINER_PATH"
+            docker exec portfolio-varnish varnishadm vcl.use "$VCL_LABEL"
+            echo "✓ active VCL is now $VCL_LABEL"
+
+            # Discard old labels beyond the last two (keeps the immediately-
+            # previous label for one-command rollback).
+            docker exec portfolio-varnish varnishadm vcl.list | \
+              awk '$1=="available" && $2!="'"$VCL_LABEL"'" {print $4}' | \
+              head -n -1 | \
+              xargs -r -I {} docker exec portfolio-varnish varnishadm vcl.discard {} || true
+
+            # Smoke test — Varnish should respond via the container's
+            # loopback :80 (the varnish:7.1-alpine image's default accept
+            # port; not the bare-metal-classic :6081). The from-Caddy
+            # request path is exercised naturally by real traffic.
+            docker exec portfolio-varnish curl -sf -o /dev/null \
+              -w "smoke (container-loopback): HTTP %{http_code}\n" \
+              http://127.0.0.1:80/wp-json/ || true
+
+            rm -f "$STAGE"
+
+      - name: Post-deploy summary
+        if: always()
+        run: |
+          echo "### portfolio-varnish deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${GITHUB_SHA:0:8}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- VCL label: \`deploy-*-${GITHUB_SHA:0:8}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Reload mode: ${{ github.event.inputs.force_container_restart == 'true' && 'docker compose restart' || 'varnishadm hot-reload' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Rollback (hot, ~50ms, no dropped connections):**" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
+          echo "docker exec portfolio-varnish varnishadm vcl.list" >> "$GITHUB_STEP_SUMMARY"
+          echo "docker exec portfolio-varnish varnishadm vcl.use <previous-label>" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
