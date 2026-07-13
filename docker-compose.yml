@@ -6,8 +6,13 @@
 #   Then run:  ./scripts/wp-setup.sh  (or follow README steps)
 #
 # Ports:
-#   8080  → WordPress admin + REST API
+#   8080  → WordPress admin + REST API (direct, bypasses cache)
+#   8081  → Varnish 7.3 origin page cache in front of WordPress (5m TTL + 60s grace)
 #   3306  → MySQL (exposed for optional direct DB access)
+#
+# Point WORDPRESS_URL in .env.local at http://localhost:8081 to route the
+# Next.js fetch client through Varnish. The plain :8080 port stays wired for
+# wp-admin sessions and the plugin's outbound revalidate webhook.
 #
 # Volumes persist data between restarts. To start fresh:
 #   docker compose down -v
@@ -59,6 +64,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # ─── Varnish 7.3 origin page cache ──────────────────────────────────────────
+  # Same shape production headless stacks run behind their multi-CDN: origin-side request
+  # coalescing + grace mode so a TTL expiry never stampedes MySQL. Purge is
+  # ACL-gated to the docker network + localhost — see varnish/default.vcl.
+  varnish:
+    image: varnish:7.3-alpine
+    restart: unless-stopped
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    ports:
+      - "8081:80"
+    environment:
+      VARNISH_SIZE: 128m
+    volumes:
+      - ./varnish/default.vcl:/etc/varnish/default.vcl:ro
+    tmpfs:
+      - /var/lib/varnish:exec
 
 volumes:
   db_data:
