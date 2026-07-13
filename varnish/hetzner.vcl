@@ -104,18 +104,13 @@ sub vcl_backend_response {
     # (Header stays out of the client response — Next.js reads JSON only.)
 }
 
-sub vcl_hit {
-    # Serve stale objects during grace window — the classic request-coalescing
-    # + stale-while-revalidate pattern. One request refetches, everyone else
-    # gets the stale copy immediately. Prevents thundering herd on TTL expiry.
-    if (obj.ttl >= 0s) {
-        return (deliver);
-    }
-    if (obj.ttl + obj.grace > 0s) {
-        return (deliver);
-    }
-    return (miss);
-}
+# NOTE: We don't override vcl_hit. Varnish 7's built-in vcl_hit already
+# implements the request-coalescing + stale-while-revalidate pattern when
+# beresp.grace is set in vcl_backend_response (above): if the object is
+# fresh → deliver; if stale but within grace → deliver stale while a single
+# fetch refreshes in the background; if past grace → fetch. That's exactly
+# what we want. Custom vcl_hit was a Varnish-4-ism (return (miss) is no
+# longer a valid action in 7.x).
 
 sub vcl_deliver {
     # Cache-hit visibility for debugging + PR screenshots.
