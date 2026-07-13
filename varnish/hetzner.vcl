@@ -1,6 +1,6 @@
 vcl 4.1;
 
-# Varnish 7.3 origin page cache — PRODUCTION topology (Hetzner VPS).
+# Varnish 7.1 origin page cache — PRODUCTION topology (Hetzner VPS).
 # Same policy as varnish/default.vcl; only the backend block differs.
 # See .github/workflows/deploy-varnish-hetzner.yml — this file is what
 # GitHub Actions scps to /etc/varnish/default.vcl on the VPS.
@@ -9,7 +9,7 @@ vcl 4.1;
 #
 #   Vercel Edge (Next.js ISR, per-tag)
 #        ↓ POST /api/revalidate → fires PURGE here
-#   Varnish 7.3  (this file, listening on :80 on the Hetzner VPS)
+#   Varnish 7.1  (this file, listening on :80 on the Hetzner VPS)
 #        ↓ backend `wp` = Apache on the same host, loopback :8080
 #   Apache + WordPress
 #        ↓ Redis object cache (L1 in the WP process)

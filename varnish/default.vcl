@@ -1,6 +1,6 @@
 vcl 4.1;
 
-# Varnish 7.3 origin page cache for the headless-wp-next WordPress backend.
+# Varnish 7.1 origin page cache for the headless-wp-next WordPress backend.
 # Sits between Next.js (fetch client) and Apache — the same shape
 # production headless stacks run behind their CDN layer: origin-side
 # coalescing + grace so a TTL expiry never stampedes MySQL.
@@ -9,7 +9,7 @@ vcl 4.1;
 #
 #   Vercel Edge (Next.js ISR, per-tag)
 #        ↓ POST /api/revalidate → fires PURGE here
-#   Varnish 7.3  (this file)  ← grace 60s, coalescing on, PURGE ACL
+#   Varnish 7.1  (this file)  ← grace 60s, coalescing on, PURGE ACL
 #        ↓ backend `wp`
 #   Apache + WordPress
 #        ↓ Redis object cache (L1 in the WP process)
