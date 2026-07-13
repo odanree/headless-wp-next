@@ -3,11 +3,11 @@
 - Status: Accepted
 - Date: 2026-07-12
 - Deciders: Danh Le
-- Related: [ADR-001](./001-production-shape-architecture-clone.md) (Phase 4)
+- Related: [ADR-001](./001-production-shape-upgrade.md) (Phase 4)
 
 ## Context
 
-production headless stacks ships a strict `Content-Security-Policy` in production alongside the usual HSTS / X-Frame / Referrer-Policy trio. That's the defence-in-depth layer that lives at the render tier: even if a bug lets an attacker inject markup into a WordPress-authored article body, CSP prevents that markup from executing script, phoning home, or loading remote assets outside the explicit allowlist.
+Production-shaped headless stacks ship a strict `Content-Security-Policy` alongside the usual HSTS / X-Frame / Referrer-Policy trio. That's the defence-in-depth layer that lives at the render tier: even if a bug lets an attacker inject markup into a WordPress-authored article body, CSP prevents that markup from executing script, phoning home, or loading remote assets outside the explicit allowlist.
 
 Before this change, `headless-wp-next` returned no security headers at all. Any inline `<script>` in a WordPress post body would execute; the app was framable; MIME sniffing was permitted.
 

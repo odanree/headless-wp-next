@@ -3,13 +3,13 @@
 - Status: Accepted
 - Date: 2026-07-12
 - Deciders: Danh Le
-- Related: [ADR-001](./001-production-shape-architecture-clone.md) (Phase 2)
+- Related: [ADR-001](./001-production-shape-upgrade.md) (Phase 2)
 
 ## Context
 
-production headless stacks fronts every request with two independent cache layers:
+Production-scale headless stacks front every request with two independent cache layers:
 
-1. **Edge**: multi-CDN (Cloudflare + CloudFront) — geographic latency reduction.
+1. **Edge**: multi-CDN (Cloudflare + CloudFront is a common shape) — geographic latency reduction.
 2. **Origin**: Varnish sitting in front of the render tier — request coalescing + grace so a TTL expiry never stampedes the database.
 
 Before this change, `headless-wp-next` had layer 1 (Vercel ISR via `next: { revalidate, tags }`) but no origin cache. When the edge TTL expired, the background regeneration hit Apache → PHP → MySQL directly. Under load, a single popular tag expiring at the same second means N simultaneous MySQL queries. That's the classic thundering herd.
@@ -51,11 +51,11 @@ Both layers evict in lockstep. A Varnish outage falls through to the 5m TTL as a
 ## Alternatives considered
 
 - **Redis full-page cache** (via `wp-super-cache` or similar). Rejected: adds a WordPress plugin that would ship at deploy time, and its invalidation semantics are less precise than Varnish's tag-ban model. Redis stays as the L1 object cache inside PHP.
-- **Cloudflare Workers as origin cache**. Rejected for the local/demo target: Varnish runs identically in dev and prod, and grace-mode semantics match production headless stacks's actual origin more closely than a Worker.
+- **Cloudflare Workers as origin cache**. Rejected for the local/demo target: Varnish runs identically in dev and prod, and its grace-mode semantics match the reference production topology more closely than a Worker.
 - **Just increase edge revalidate window**. Rejected: doesn't solve the stampede on TTL expiry, only postpones it.
 
 ## References
 
 - Varnish 7.3 VCL reference: https://varnish-cache.org/docs/7.3/reference/vcl.html
-- production headless stacks architecture reconstruction: `../architecture-notes.md` (private)
+- Reference architecture reconstruction notes: `../architecture-notes.md` (private)
 - Layered cache flow diagram (inline in `app/api/revalidate/route.ts` docstring)

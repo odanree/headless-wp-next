@@ -3,11 +3,11 @@
 - Status: Accepted
 - Date: 2026-07-12
 - Deciders: Danh Le
-- Related: [ADR-001](./001-production-shape-architecture-clone.md) (Phase 3)
+- Related: [ADR-001](./001-production-shape-upgrade.md) (Phase 3)
 
 ## Context
 
-production headless stacks personalizes their marketing surface via **Optimizely at the edge**: a cookie is stamped on first visit, subsequent requests carry the cookie, and the render layer swaps DOM based on the assigned variant. Two properties matter:
+Production A/B tooling on headless stacks follows a repeatable shape — **variant assignment at the edge, render on the server**: a cookie is stamped on first visit, subsequent requests carry the cookie, and the render layer emits the assigned variant. Two properties matter:
 
 1. **No client-side flicker.** The visitor never sees variant A repaint into variant B after hydration — the wrong variant would tank the experiment's signal.
 2. **Cookie-scoped, not JS-scoped.** Bots without cookies get the control; humans keep their assignment across sessions for the full experiment window.
@@ -61,7 +61,7 @@ Cost: edge middleware size ticked from 34 kB → 34.5 kB (bucket logic + codec).
 
 ## Alternatives considered
 
-- **Optimizely full-fat**. Rejected for this demo: adds a third-party JS bundle, a network call before render, and CSP allowlist entries. The point of ADR-001 is to reproduce the shape, not the vendor.
+- **Full commercial A/B platform** (Optimizely, LaunchDarkly, VWO). Rejected for this demo: adds a third-party JS bundle, a network call before render, and CSP allowlist entries. The point of ADR-001 is to reproduce the shape, not the vendor.
 - **Client-side assignment with a flash-of-wrong-content**. Rejected: kills the experiment signal, adds hydration flicker.
 - **Vercel Edge Config**. Rejected: adds a hosted dependency; the local dev story is the same as prod's when the pattern lives in code.
 
