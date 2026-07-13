@@ -66,9 +66,10 @@ services:
       retries: 10
 
   # ─── Varnish 7.3 origin page cache ──────────────────────────────────────────
-  # Same shape production headless stacks run behind their multi-CDN: origin-side request
-  # coalescing + grace mode so a TTL expiry never stampedes MySQL. Purge is
-  # ACL-gated to the docker network + localhost — see varnish/default.vcl.
+  # The same shape production headless stacks run behind their multi-CDN:
+  # origin-side request coalescing + grace mode so a TTL expiry never
+  # stampedes MySQL. Purge is ACL-gated to the docker network + localhost
+  # — see varnish/default.vcl.
   varnish:
     image: varnish:7.3-alpine
     restart: unless-stopped

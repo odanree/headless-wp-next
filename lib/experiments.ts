@@ -1,8 +1,9 @@
 /**
  * lib/experiments.ts
  *
- * Experiment registry + assignment helpers — the shape production headless stacks run
- * via Optimizely: bucket users at the edge on first request, stamp a cookie,
+ * Experiment registry + assignment helpers — the shape commercial A/B
+ * platforms (Optimizely, LaunchDarkly, VWO) run at the edge: bucket users
+ * at the edge on first request, stamp a cookie,
  * then Server Components render the assigned variant on every subsequent
  * navigation with zero client-side flicker (no DOM swap after paint).
  *

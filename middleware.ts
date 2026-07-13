@@ -20,8 +20,9 @@ import {
  *     variant, roll one via weighted random and stamp the cookie on the
  *     response with a 90-day max-age. The full assignment is forwarded as
  *     `x-experiment` on the request so Server Components can render the
- *     right variant with zero client-side DOM swap. Same pattern production headless stacks
- *     runs via Optimizely: bucket at the edge, render on the server.
+ *     right variant with zero client-side DOM swap. Same shape commercial
+ *     A/B tooling (Optimizely et al.) runs: bucket at the edge, render on
+ *     the server.
  *
  * SCALABILITY NOTE (unchanged):
  *   Membership check remains O(1). Adding experiment bucketing is also O(1)

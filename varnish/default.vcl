@@ -1,9 +1,9 @@
 vcl 4.1;
 
 # Varnish 7.3 origin page cache for the headless-wp-next WordPress backend.
-# Sits between Next.js (fetch client) and Apache — same shape production headless stacks
-# runs behind Cloudflare + CloudFront: origin-side coalescing + grace so a
-# TTL expiry never stampedes MySQL.
+# Sits between Next.js (fetch client) and Apache — the same shape
+# production headless stacks run behind their CDN layer: origin-side
+# coalescing + grace so a TTL expiry never stampedes MySQL.
 #
 # Layering, top-down:
 #
