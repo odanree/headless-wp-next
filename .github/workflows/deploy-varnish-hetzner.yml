@@ -149,11 +149,12 @@ jobs:
               xargs -r -I {} docker exec portfolio-varnish varnishadm vcl.discard {} || true
 
             # Smoke test — Varnish should respond via the container's
-            # loopback :6081 (accept port). The from-Caddy request path
-            # is exercised naturally by real traffic.
+            # loopback :80 (the varnish:7.1-alpine image's default accept
+            # port; not the bare-metal-classic :6081). The from-Caddy
+            # request path is exercised naturally by real traffic.
             docker exec portfolio-varnish curl -sf -o /dev/null \
               -w "smoke (container-loopback): HTTP %{http_code}\n" \
-              http://127.0.0.1:6081/wp-json/ || true
+              http://127.0.0.1:80/wp-json/ || true
 
             rm -f "$STAGE"
 
