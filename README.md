@@ -1,8 +1,8 @@
 # headless-wp-next
 
-A minimal, production-structured headless WordPress frontend built with **Next.js 14 App Router**.
+A minimal, production-structured headless WordPress frontend built with **Next.js 15 App Router** (React 19).
 
-Runs in **mock mode** by default — no WordPress install required. Swap in real WordPress credentials to connect to a live backend.
+Runs in **mock mode** by default — no WordPress install required. Swap in real WordPress credentials to connect to a live backend. Ships with a Varnish 7.3 origin cache, edge A/B assignment, and a strict CSP so the deployed header shape matches production headless-Next.js stacks. See [`docs/adr/`](docs/adr/) for per-decision write-ups.
 
 ---
 
@@ -10,13 +10,16 @@ Runs in **mock mode** by default — no WordPress install required. Swap in real
 
 | Concept | Where |
 |---|---|
-| Edge Middleware auth gate | [`middleware.ts`](middleware.ts) |
+| Edge Middleware — auth gate + A/B assignment | [`middleware.ts`](middleware.ts) |
+| Edge A/B: cookie-bucketed, Server-rendered variants | [`lib/experiments.ts`](lib/experiments.ts) + [`lib/getVariant.ts`](lib/getVariant.ts) + [`app/HeroCopy.tsx`](app/HeroCopy.tsx) |
 | httpOnly cookie session | [`app/checkout/success/page.tsx`](app/checkout/success/page.tsx) |
 | Stripe Checkout + webhook fulfillment | [`app/api/checkout/route.ts`](app/api/checkout/route.ts) + [`app/api/webhooks/stripe/route.ts`](app/api/webhooks/stripe/route.ts) |
-| Server Component data fetching | [`app/members/page.tsx`](app/members/page.tsx) |
+| Server Component data fetching (Next 15 async APIs) | [`app/members/page.tsx`](app/members/page.tsx) |
 | Server + Client Component composition | `page.tsx` (SC) + `LogoutButton.tsx` (CC) |
 | Mock → live data swap | [`lib/wordpress.ts`](lib/wordpress.ts) |
-| ISR + on-demand revalidation | [`lib/wordpress.ts`](lib/wordpress.ts) + [`app/api/revalidate/route.ts`](app/api/revalidate/route.ts) |
+| Two-layer cache: ISR (edge) + Varnish (origin) | [`lib/wordpress.ts`](lib/wordpress.ts) + [`varnish/default.vcl`](varnish/default.vcl) + [`app/api/revalidate/route.ts`](app/api/revalidate/route.ts) |
+| Origin coalescing + grace mode (5m TTL + 60s grace) | [`varnish/default.vcl`](varnish/default.vcl) |
+| Strict `default-src 'none'` CSP + HSTS + COOP + FLoC opt-out | [`next.config.js`](next.config.js) |
 | WordPress CPT + Bearer token REST API | [`wordpress-plugin/headless-wp-members.php`](wordpress-plugin/headless-wp-members.php) |
 | Member CPT — customer records outside WP Users | [`wordpress-plugin/headless-wp-members.php`](wordpress-plugin/headless-wp-members.php) |
 | Lazy SDK init (build-time safety) | [`app/api/webhooks/stripe/route.ts`](app/api/webhooks/stripe/route.ts) |
@@ -30,11 +33,19 @@ Runs in **mock mode** by default — no WordPress install required. Swap in real
 ```
 Browser
   │
-  ├─ GET /article/* or /members  (unauthenticated)
+  ├─ GET *  (any human-facing route)
   │      ▼  (Vercel Edge — before any page renders)
   │   middleware.ts
-  │      ├─ no member_token cookie ──▶ 307 /join?redirectBack=...
-  │      └─ cookie present          ──▶ forward via x-member-token header
+  │      ├─ Auth (matched on /article/*, /members/*):
+  │      │    no member_token cookie ──▶ 307 /join?redirectBack=...
+  │      │    cookie present          ──▶ forward via x-member-token header
+  │      │
+  │      └─ Experiments (every matched route):
+  │           read `exp` cookie
+  │           roll variants for any registered experiment missing one
+  │           stamp cookie (90d, SameSite=Lax) + forward assignment
+  │           via `x-experiment` header — Server Components read this
+  │           instead of reparsing cookies. See lib/experiments.ts.
   │
   ├─ POST /api/checkout
   │      └─ creates Stripe Checkout Session → returns { url }
@@ -57,17 +68,22 @@ Browser
   │
   ├─ GET /members or /article/*  (authenticated)
   │      ▼
-  │   middleware.ts  (cookie present — allowed through)
+  │   middleware.ts  (auth + experiment stamp — as above)
   │      ▼
   │   Server Component  →  lib/wordpress.ts
   │      ├─ WORDPRESS_URL not set ──▶ lib/mock-data.ts (instant, mock mode)
-  │      └─ WORDPRESS_URL set ──────▶ fetch() → WordPress REST API
+  │      └─ WORDPRESS_URL set ──────▶ fetch() → Varnish (origin cache)
+  │                                         5m TTL + 60s grace + coalescing
+  │                                    ──▶ Apache/PHP → WordPress REST API
   │                                         Authorization: Bearer <token>
   │                                         next: { revalidate: 300, tags: ['articles'] }
   │
-  └─ POST /api/revalidate
+  └─ POST /api/revalidate  (fired by WP save_post hook)
          │  { secret, tags: ['articles', 'public-articles', 'article-<id>'] }
-         └─ revalidateTag() — instant CDN cache bust (triggered by WP save_post hook)
+         ├─ revalidateTag() — instant Vercel edge cache bust
+         └─ BAN X-Cache-Tag: <tag>  ──▶ Varnish origin cache eviction
+                                       (fire-and-forget; Varnish outage
+                                        falls through to 5m TTL backstop)
 ```
 
 ---
@@ -86,7 +102,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3004](http://localhost:3004).
 
 - Click **Members Articles →** — you'll be redirected to Sign In (no cookie yet)
 - Sign in with any username + password `members-only-2026`
@@ -144,9 +160,9 @@ WP Admin → **Member Articles** → Add New. The `article_category` and `read_t
 
 In mock mode (no `WORDPRESS_URL` set), the Vercel deployment works out of the box.
 
-### DigitalOcean (WordPress backend)
+### Hetzner (WordPress backend)
 
-The WordPress side of a live deployment runs on a DigitalOcean droplet — LEMP stack with the `headless-wp-members.php` plugin dropped into `wp-content/plugins/`. Vercel is the front, DigitalOcean is the back; the two talk over the WP REST API with a Bearer token stored server-side.
+The WordPress side of a live deployment runs on a Hetzner VPS — LEMP stack with Varnish 7.3 fronting Apache, and the `headless-wp-members.php` plugin dropped into `wp-content/plugins/`. Vercel is the front, Hetzner is the back; the two talk over the WP REST API with a Bearer token stored server-side. Route DNS at `cms.<your-domain>.com` → Varnish → Apache.
 
 The plugin uses **blocking `wp_remote_post`** for revalidation calls so PHP-FPM guarantees the request is delivered before returning — non-blocking left the ISR cache stale intermittently under load.
 
@@ -218,6 +234,45 @@ ISR with `revalidateTag()` gives SSG-level performance while allowing a WordPres
 
 ---
 
+### Why Varnish at the origin (not just Vercel's edge cache)?
+
+Vercel handles the edge — CDN-side caching per region, `revalidateTag()` invalidation, per-tag purge. But when the edge cache expires and the background regeneration fires, that request hits Apache → PHP → MySQL directly. Under a popular tag expiring at the same second, that's N simultaneous MySQL queries from the same Vercel POP: classic thundering herd.
+
+Varnish 7.3 sits between Next.js's fetch client and Apache with three defence-in-depth properties:
+
+1. **Request coalescing** — a single origin fetch per URL regardless of concurrency. If ten simultaneous requests hit the same expired key, nine wait for the tenth.
+2. **Grace mode (60s)** — while a background refetch runs, everyone else gets the stale copy immediately. No wait state.
+3. **Tag-based BAN invalidation** — `/api/revalidate` fires a sibling `BAN X-Cache-Tag: <tag>` alongside `revalidateTag()`, so edge + origin evict in lockstep. Fire-and-forget: Varnish outage falls through to the 5m TTL as an automatic backstop. Edge revalidation never blocks on it.
+
+ACL is scoped to the Docker network + RFC1918 ranges — Varnish's admin port is never internet-facing. See [`docs/adr/002-varnish-origin-cache.md`](docs/adr/002-varnish-origin-cache.md) for the full VCL rationale.
+
+---
+
+### Why edge A/B assignment (not client-side JS)?
+
+Client-side A/B swap flashes the control variant, hydrates, then repaints to the assigned variant. That flash tanks the experiment's signal — users see (and react to) content that isn't the variant they were bucketed into.
+
+The pattern here is **write at the edge, read at the server**:
+
+- **Edge write** — `middleware.ts` reads the `exp` cookie on every matched request. For any registered experiment missing a variant, it rolls one via weighted random and stamps a 90-day `SameSite=Lax` cookie. The full assignment is forwarded on the request as an `x-experiment` header.
+- **Server read** — Server Components call `getVariant('exp_id')` from [`lib/getVariant.ts`](lib/getVariant.ts). That reads the header via `headers()` and falls back to the control variant when the header is missing — deterministic rendering, no `undefined` in JSX.
+
+Adding an experiment is a one-line change to the [`EXPERIMENTS`](lib/experiments.ts) registry. Middleware picks it up on the next request without any middleware edit. Retiring an experiment: remove the entry — old cookie values become no-ops without breaking anything. Full rationale in [`docs/adr/003-edge-ab-assignment.md`](docs/adr/003-edge-ab-assignment.md).
+
+---
+
+### Why strict CSP with an explicit per-directive allowlist?
+
+CSP is the defence-in-depth layer for markup injection. Even if a bug lets an attacker slip a `<script>` into a WordPress-authored article body, CSP prevents that script from executing, phoning home, or loading remote assets outside what's explicitly trusted.
+
+The policy is written as a JS object in [`next.config.js`](next.config.js) — declaring each directive as an array makes adding a third-party (analytics, chat widget) a one-line edit that shows exactly what's being trusted in the diff. Baseline is `default-src 'none'`; every capability is opted in.
+
+Deliberately deferred: `'strict-dynamic'` + per-request nonces. That needs the RSC serializer to thread a nonce through every inline `<script>` — a follow-up PR once we've audited the script emit paths. Written up in [`docs/adr/004-security-headers-csp.md`](docs/adr/004-security-headers-csp.md).
+
+Companion headers (also in `next.config.js`): HSTS 2y + preload, `X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `Referrer-Policy strict-origin-when-cross-origin`, `Permissions-Policy` denying camera/mic/geo + FLoC opt-out, `Cross-Origin-Opener-Policy same-origin`.
+
+---
+
 ### WooCommerce integration path
 
 The current auth flow issues a single httpOnly cookie. WooCommerce's Store API (`/wp-json/wc/store/v1/cart`) authenticates via WordPress Nonces. The extension path is:
@@ -245,42 +300,78 @@ Targets WCAG 2.1 AA-level patterns for the interactive surfaces; not third-party
 
 ```
 headless-wp-next/
-├── middleware.ts                    # Edge auth gate
-├── next.config.js
+├── middleware.ts                    # Edge auth gate + A/B experiment assignment
+├── next.config.js                   # Strict CSP + security headers via async headers()
+├── docker-compose.yml               # WordPress + MySQL + Varnish 7.3 dev stack
 ├── vercel.json
 ├── .env.example
+│
+├── docs/
+│   ├── ARCHITECTURE.md              # Two-stage auth + webhook-as-source-of-truth
+│   ├── DEPLOYMENT.md                # Vercel + Hetzner + Stripe wiring
+│   ├── LEARNINGS.md                 # Postmortems (unreachable-WP build resilience, etc.)
+│   └── adr/                         # Architecture Decision Records (MADR)
+│       ├── 001-production-shape-upgrade.md
+│       ├── 002-varnish-origin-cache.md
+│       ├── 003-edge-ab-assignment.md
+│       └── 004-security-headers-csp.md
+│
+├── varnish/
+│   └── default.vcl                  # Varnish 7.3 config: 5m TTL + 60s grace + BAN by tag
 │
 ├── types/
 │   └── wordpress.ts                 # Shared TypeScript interfaces
 │
 ├── lib/
 │   ├── mock-data.ts                 # 5 realistic articles — no WP needed
-│   └── wordpress.ts                 # WP REST client + mock fallback
+│   ├── wordpress.ts                 # WP REST client + mock fallback
+│   ├── woocommerce.ts               # WooCommerce Store API client
+│   ├── experiments.ts               # A/B registry + assignment helpers
+│   └── getVariant.ts                # Server Component reader for x-experiment header
+│
+├── contexts/
+│   └── CartContext.tsx              # Client-side cart state
 │
 ├── wordpress-plugin/
 │   └── headless-wp-members.php      # Drop-in WP plugin
 │
+├── scripts/
+│   ├── do-verify.sh                 # Smoke test the WP + Next.js contract
+│   └── wp-setup.sh                  # One-shot local WP configuration
+│
 └── app/
     ├── globals.css
-    ├── layout.tsx
-    ├── page.tsx                     # Public home
-    ├── home.module.css
+    ├── layout.tsx                   # Async root layout (Next 15) — reads member cookie
+    ├── NavBar.tsx
+    ├── ArticleCard.tsx
+    ├── HeroCopy.tsx                 # Server Component; renders assigned A/B variant
+    ├── page.tsx                     # Public catalogue home
     │
     ├── api/
-    │   ├── auth/login/route.ts      # Issues httpOnly cookie
-    │   ├── auth/logout/route.ts     # Expires cookie
-    │   └── revalidate/route.ts      # On-demand ISR cache bust
+    │   ├── auth/login/route.ts
+    │   ├── auth/logout/route.ts
+    │   ├── auth/set-password/route.ts
+    │   ├── auth/stripe-callback/route.ts   # Post-Stripe cookie issuance + redirect
+    │   ├── checkout/route.ts               # Creates Stripe Checkout Session
+    │   ├── revalidate/route.ts             # revalidateTag() + Varnish BAN
+    │   └── webhooks/stripe/route.ts        # Signature-verified fulfillment
+    │
+    ├── article/[id]/
+    │   └── page.tsx                 # Public article detail — dynamic params (Next 15)
     │
     ├── members/
-    │   ├── page.tsx                 # Protected article listing (Server Component)
-    │   ├── members.module.css
-    │   ├── LogoutButton.tsx         # 'use client' — SC+CC composition demo
-    │   └── [id]/
-    │       ├── page.tsx             # Article detail (Server Component)
-    │       └── article.module.css
+    │   ├── page.tsx
+    │   ├── LogoutButton.tsx
+    │   └── [id]/page.tsx
     │
-    └── join/
-        ├── page.tsx                 # Server Component — passes redirectBack to form
-        ├── JoinForm.tsx             # 'use client' — CTA + login form
-        └── join.module.css
+    ├── join/
+    │   ├── page.tsx
+    │   └── JoinForm.tsx
+    │
+    ├── cart/
+    │   └── page.tsx
+    │
+    └── checkout/
+        ├── success/page.tsx         # Post-Stripe success display (cookie is set upstream)
+        └── set-password/page.tsx    # Re-login credential setup for returning members
 ```
