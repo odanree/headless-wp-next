@@ -50,13 +50,17 @@ jobs:
         # on the VPS (portfolio-varnish, defined in odanree/portfolio-infra
         # docker-compose). Bump both together if the container upgrades.
         #
-        # Note: the backend `.host = "wordpress"` won't resolve from inside
-        # this validator container (no docker-compose network here). That's
-        # fine — varnishd -Cf compiles VCL to C without resolving backends;
-        # DNS resolution happens at vcl.load time on the VPS, where the
-        # portfolio-net network makes `wordpress` resolvable.
+        # varnishd's VCC compiler resolves backend hostnames at compile time,
+        # not at request time — so `.host = "wordpress"` fails DNS lookup on
+        # this bare runner. `--add-host wordpress:127.0.0.1` puts an entry in
+        # the validator container's /etc/hosts so getaddrinfo succeeds; the
+        # runner never actually connects to that address, only compiles.
+        # Runtime resolution on the VPS is unaffected (real portfolio-net
+        # docker DNS still resolves `wordpress` to the WP container's IP).
         run: |
-          docker run --rm -v "${{ github.workspace }}/varnish:/etc/varnish:ro" \
+          docker run --rm \
+            --add-host wordpress:127.0.0.1 \
+            -v "${{ github.workspace }}/varnish:/etc/varnish:ro" \
             varnish:7.1-alpine varnishd -Cf /etc/varnish/hetzner.vcl > /dev/null
           echo "✓ VCL syntax valid"
 
