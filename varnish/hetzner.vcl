@@ -17,24 +17,31 @@ vcl 4.1;
 
 import std;
 
-# Backend = Apache on the same VPS, loopback only. Apache is bound to
-# 127.0.0.1:8080 (never internet-facing) — see the bootstrap runbook.
-# Varnish owns port 80 externally; nothing else on the box should.
+# Backend = portfolio-wordpress container on the shared portfolio-net.
+# Docker DNS resolves `wordpress` to the WP container's network IP. Same
+# service-discovery-via-container-name shape that portfolio-caddy already
+# uses. No host-loopback hop; both containers on the same L2 network.
 backend wp {
-    .host = "127.0.0.1";
-    .port = "8080";
+    .host = "wordpress";
+    .port = "80";
     .connect_timeout = 2s;
     .first_byte_timeout = 10s;
     .between_bytes_timeout = 5s;
 }
 
-# PURGE is only allowed from localhost — the Next.js edge fires BAN via the
-# WP plugin's outbound HTTP call, so BAN requests originate from Apache on
-# this same box (which reaches Varnish through the loopback). Never expose
-# Varnish's admin port publicly — this ACL is the trust boundary.
+# PURGE/BAN reach Varnish through portfolio-caddy (the L7 edge). Caddy
+# forwards the request with its own docker-network IP as the source, so
+# the ACL accepts RFC1918 ranges that Docker default bridge networks use.
+# This is a routing-level trust boundary — the real authenticity check
+# lives one layer up: Next.js /api/revalidate verifies a shared secret
+# before firing the BAN, and Caddy (public-facing) is the only path into
+# the docker network from outside.
 acl purgers {
     "127.0.0.1";
     "localhost";
+    "172.16.0.0"/12;    # docker default bridge range (covers portfolio-net + friends)
+    "10.0.0.0"/8;       # overlay / swarm networks if this stack ever hoists there
+    "192.168.0.0"/16;   # user-defined bridge networks
 }
 
 sub vcl_recv {
