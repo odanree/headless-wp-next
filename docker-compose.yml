@@ -82,8 +82,11 @@ services:
       VARNISH_SIZE: 128m
     volumes:
       - ./varnish/default.vcl:/etc/varnish/default.vcl:ro
-    tmpfs:
-      - /var/lib/varnish:exec
+    # /var/lib/varnish stays on the container's writable layer (not tmpfs).
+    # varnishd runs as the unprivileged `varnish` user in this image; a
+    # bare `tmpfs: /var/lib/varnish` mount is root-owned mode 1777 and
+    # varnishd refuses to create its per-instance workdir there. The image
+    # already sets correct ownership on /var/lib/varnish — leave it alone.
 
 volumes:
   db_data:
